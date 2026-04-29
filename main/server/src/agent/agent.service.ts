@@ -122,6 +122,7 @@ export class AgentService {
                     if (
                         nodeName === 'rag' &&
                         update.enhancedPrompt &&
+                        !currentState.userInput?.maskData &&
                         !(currentState.userInput?.previousPrompts?.length > 0)
                     ) {
                         yield {
