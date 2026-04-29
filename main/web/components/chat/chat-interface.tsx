@@ -1,0 +1,785 @@
+/**
+ * 基础聊天界面组件
+ * 使用 GenUI 协议驱动的动态渲染系统
+ * 集成会话管理功能
+ */
+
+'use client'
+
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { Send, Loader2, Sparkles, ArrowDown } from 'lucide-react'
+import { useAgentChat } from '@/hooks/use-sse'
+import {
+    ThoughtLogEventData, //AI 思考日志事件数据
+    EnhancedPromptEventData, //增强提示事件数据
+    GenUIComponentEventData, //GenUI 组件事件数据
+} from '@/lib/types/sse'
+import {
+    GenUIComponent,
+    GenUIRenderer,
+    generateComponentId,
+    ensureGenUIRegistryInitialized,
+} from '@/genui'
+import { cn } from '@/lib/utils'
+import { useSessionStore } from '@/stores/session-store'
+import { MessageService } from '@/lib/services/message-service'
+import { initDatabase } from '@/lib/db/database'
+import { flushSync } from 'react-dom'
+
+interface ChatInterfaceProps {
+    title?: string
+    placeholder?: string
+    onChatEnd?: () => void
+}
+
+interface ChatTurn {
+    id: string
+    role: 'user' | 'assistant'
+    content: string
+    timestamp: number
+    genUIComponents?: GenUIComponent[]
+}
+
+/**
+ * 渲染 GenUI 组件
+ * ThoughtLogItem 时间轴 | EnhancedPrompt | ImageView(s) | AgentMessage(s) | ActionPanel(底部)
+ * ActionPanel 独立显示在底部，不合并到 ImageView
+ * 当 maskDrawImageUrl 匹配某 ImageView 的 imageUrl 时，渲染 SmartCanvas(draw_mask) 替代
+ */
+function GenUIComponentRenderer({
+    components,
+    isProcessing,
+    onImageLoad,
+    maskDrawImageUrl,
+}: {
+    components: GenUIComponent[]
+    isProcessing: boolean
+    onImageLoad: () => void
+    maskDrawImageUrl?: string | null
+}) {
+    useEffect(() => {
+        ensureGenUIRegistryInitialized()
+    }, [])
+    // console.log('[GenUIComponentRenderer] components:', components)
+    //由于SSE的问题，到达的内容是乱序的，碎片的：thoughtLog1，thoughtLog2，enhancedPrompt1，thoughtLog3...因此这里是把他们按顺序合并起来
+    const thoughtLogs = components.filter(
+        (c) => c.widgetType === 'ThoughtLogItem'
+    )
+    //console.log('[GenUIComponentRenderer] thoughtLogs:', thoughtLogs)
+    const enhancedPrompts = components.filter(
+        (c) => c.widgetType === 'EnhancedPromptView'
+    )
+    const images = components.filter((c) => c.widgetType === 'ImageView')
+    const smartCanvases = components.filter(
+        (c) => c.widgetType === 'SmartCanvas'
+    )
+    const agentMessages = components.filter(
+        (c) => c.widgetType === 'AgentMessage'
+    )
+    const actionPanels = components.filter(
+        (c) => c.widgetType === 'ActionPanel'
+    )
+    const lastActionPanel = actionPanels[actionPanels.length - 1]
+    const lastImage =
+        images[images.length - 1] ?? smartCanvases[smartCanvases.length - 1]
+    const lastImageUrl = lastImage
+        ? (lastImage.props as { imageUrl?: string }).imageUrl
+        : undefined
+
+    return (
+        <div className="space-y-6 animate-in fade-in duration-500">
+            {/* 1. 思考过程 (Timeline) */}
+            {(thoughtLogs.length > 0 || isProcessing) && (
+                <div className="pl-2">
+                    <div className="flex items-center gap-2 mb-4 text-sm font-medium text-muted-foreground">
+                        <div
+                            className={cn(
+                                'w-2 h-2 rounded-full',
+                                isProcessing
+                                    ? 'bg-blue-500 animate-pulse'
+                                    : 'bg-muted'
+                            )}
+                        />
+                        AI 思考过程
+                    </div>
+                    <div className="ml-1 pl-4 border-l-2 border-muted/50 space-y-0">
+                        {thoughtLogs.map((component, index) => {
+                            const isLast = index === thoughtLogs.length - 1
+                            const propsWithIsLast = {
+                                ...component.props,
+                                isLast,
+                            }
+                            return (
+                                <GenUIRenderer
+                                    key={component.id || `thought-${index}`}
+                                    component={{
+                                        ...component,
+                                        props: propsWithIsLast,
+                                    }}
+                                />
+                            )
+                        })}
+                        {/* 这里有问题，思考时length一直是0，导致加载中状态一直不显示 */}
+                        {isProcessing && thoughtLogs.length === 0 && (
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground py-2 pl-6">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                正在分析意图...
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* 2. 增强 Prompt */}
+            {enhancedPrompts.map((component, index) => (
+                <GenUIRenderer
+                    key={component.id || `enhanced-${index}`}
+                    component={component}
+                />
+            ))}
+
+            {/* 3. 图片与 SmartCanvas */}
+            {images.length > 0 && (
+                <div className="space-y-6">
+                    {images.map((imageComponent, index) => {
+                        const imageUrl = (
+                            imageComponent.props as { imageUrl?: string }
+                        ).imageUrl
+                        const showMaskDraw =
+                            maskDrawImageUrl && imageUrl === maskDrawImageUrl
+
+                        if (showMaskDraw) {
+                            return (
+                                <div
+                                    key={imageComponent.id || `canvas-${index}`}
+                                    className="animate-in zoom-in-50 duration-500"
+                                >
+                                    <GenUIRenderer
+                                        component={{
+                                            id: imageComponent.id,
+                                            widgetType: 'SmartCanvas',
+                                            props: {
+                                                imageUrl,
+                                                mode: 'draw_mask',
+                                            },
+                                        }}
+                                    />
+                                </div>
+                            )
+                        }
+
+                        const imageProps = imageComponent.props as {
+                            onLoad?: () => void
+                        }
+                        const imagePropsWithLoad = {
+                            ...imageComponent.props,
+                            onLoad: () => {
+                                imageProps.onLoad?.()
+                                onImageLoad()
+                            },
+                        }
+                        return (
+                            <div
+                                key={imageComponent.id || `image-${index}`}
+                                className="animate-in zoom-in-50 duration-500"
+                            >
+                                <GenUIRenderer
+                                    component={{
+                                        ...imageComponent,
+                                        props: imagePropsWithLoad as GenUIComponent['props'],
+                                    }}
+                                />
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
+            {smartCanvases.map((component, index) => (
+                <div
+                    key={component.id || `canvas-${index}`}
+                    className="animate-in zoom-in-50 duration-500"
+                >
+                    <GenUIRenderer component={component} />
+                </div>
+            ))}
+
+            {/* 4. Agent 消息 */}
+            {agentMessages.map((component, index) => (
+                <GenUIRenderer
+                    key={component.id || `agent-${index}`}
+                    component={component}
+                />
+            ))}
+
+            {/* 5. ActionPanel 独立底部（注入最新图片 URL） */}
+            {lastActionPanel && (
+                <GenUIRenderer
+                    component={{
+                        ...lastActionPanel,
+                        props: {
+                            ...lastActionPanel.props,
+                            imageUrl: lastImageUrl,
+                        } as GenUIComponent['props'],
+                    }}
+                />
+            )}
+        </div>
+    )
+}
+
+export function ChatInterface({
+    title = 'AI 创作助手',
+    placeholder = '输入创意，如：赛博朋克猫…',
+    onChatEnd,
+}: ChatInterfaceProps) {
+    // ========== 状态管理 ==========
+    const [turns, setTurns] = useState<ChatTurn[]>([]) //对话轮次
+    const [streamingComponents, setStreamingComponents] = useState<
+        GenUIComponent[]
+    >([]) //流式组件
+    const streamingComponentsRef = useRef<GenUIComponent[]>([]) //流式组件引用
+    const [input, setInput] = useState('') //用户输入
+    const [isProcessing, setIsProcessing] = useState(false) //AI处理状态
+    const [isAutoScroll, setIsAutoScroll] = useState(true) //是否自动滚动
+    const [showScrollToBottom, setShowScrollToBottom] = useState(false) //是否显示滚动到底部按钮
+    const [isInitialized, setIsInitialized] = useState(false) //是否初始化数据库
+    const [maskDrawImageUrl, setMaskDrawImageUrl] = useState<string | null>(
+        null
+    ) //智能画布绘制的图片 URL
+
+    const sessionIdWhenSendRef = useRef<string | null>(null)
+
+    // ========== 会话管理 ==========
+    const { currentSessionId, createSession, loadSessions } = useSessionStore()
+
+    const scrollRef = useRef<HTMLDivElement>(null)
+    const bottomRef = useRef<HTMLDivElement>(null)
+
+    // ========== 初始化数据库 ==========
+    useEffect(() => {
+        if (!isInitialized) {
+            initDatabase()
+                .then(() => {
+                    console.log('[ChatInterface] Database initialized')
+                    setIsInitialized(true)
+                })
+                .catch((error) => {
+                    console.error(
+                        '[ChatInterface] Failed to initialize database:',
+                        error
+                    )
+                })
+        }
+    }, [isInitialized])
+
+    useEffect(() => {
+        console.log(
+            '[streamingComponents committed]',
+            streamingComponents.length,
+            streamingComponents.map((c) => c.widgetType)
+        )
+    }, [streamingComponents])
+
+    // ========== 加载会话消息 ========== ！！！
+    // 注意竞态：仅在会话改变时加载，避免重复加载
+    useEffect(() => {
+        if (!isInitialized) return
+
+        const sessionIdAtStart = currentSessionId
+
+        const loadCurrentSession = async () => {
+            setTurns([])
+            setStreamingComponents([])
+            streamingComponentsRef.current = []
+            setIsProcessing(false)
+
+            if (sessionIdAtStart) {
+                try {
+                    const sessionMessages =
+                        await MessageService.loadSessionMessages(
+                            sessionIdAtStart
+                        )
+                    // 竞态检查：检查会话是否已改变，若已改变则不加载
+                    const currentSessionIdNow =
+                        useSessionStore.getState().currentSessionId
+                    if (currentSessionIdNow !== sessionIdAtStart) {
+                        return
+                    }
+
+                    const loadedTurns: ChatTurn[] = sessionMessages.map(
+                        (msg) => ({
+                            id: msg.id,
+                            role: msg.role,
+                            content: msg.content,
+                            timestamp: msg.timestamp,
+                            genUIComponents: msg.genUIComponents,
+                        })
+                    )
+
+                    setTurns(loadedTurns)
+
+                    console.log(
+                        '[ChatInterface] Loaded session:',
+                        sessionIdAtStart,
+                        {
+                            turns: loadedTurns.length,
+                        }
+                    )
+                } catch (error) {
+                    console.error(
+                        '[ChatInterface] Failed to load session messages:',
+                        error
+                    )
+                }
+            } else {
+                // 如果没有当前会话，创建新会话
+                try {
+                    const newSessionId = await createSession()
+                    console.log(
+                        '[ChatInterface] Created new session:',
+                        newSessionId
+                    )
+                } catch (error) {
+                    console.error(
+                        '[ChatInterface] Failed to create session:',
+                        error
+                    )
+                }
+            }
+        }
+
+        loadCurrentSession()
+    }, [currentSessionId, isInitialized, createSession])
+
+    // ========== 添加流式组件 ==========
+    const addStreamingComponent = useCallback((component: GenUIComponent) => {
+        const next = [...streamingComponentsRef.current, component]
+        streamingComponentsRef.current = next
+        // console.log('[addStreamingComponent]', streamingComponents)
+
+        flushSync(() => {
+            setStreamingComponents(next)
+        })
+    }, [])
+
+    // ========== 更新流式组件 ==========
+    const updateStreamingComponent = useCallback(
+        (component: GenUIComponent) => {
+            const prev = streamingComponentsRef.current
+            const updateMode = component.updateMode || 'append'
+            let next: GenUIComponent[]
+
+            switch (updateMode) {
+                case 'replace':
+                    if (component.id) {
+                        const index = prev.findIndex(
+                            (c) => c.id === component.id
+                        )
+                        if (index !== -1) {
+                            next = [...prev]
+                            next[index] = component
+                        } else {
+                            next = [...prev, component]
+                        }
+                    } else {
+                        next = [...prev, component]
+                    }
+                    break
+                case 'update':
+                    if (component.id) {
+                        next = prev.map((c) =>
+                            c.id === component.id
+                                ? {
+                                      ...c,
+                                      props: { ...c.props, ...component.props },
+                                  }
+                                : c
+                        )
+                    } else {
+                        next = [...prev, component]
+                    }
+                    break
+                case 'append':
+                default:
+                    next = [...prev, component]
+            }
+            streamingComponentsRef.current = next
+            setStreamingComponents(next)
+        },
+        []
+    )
+
+    // ========== 发送消息 ==========！！！
+    // useAgentChat 为核心自定义 hooks，处理 SSE 事件流
+    const { sendMessage } = useAgentChat({
+        // 处理聊天开始事件
+        onChatStart: () => {
+            console.log('[onChatStart] RESET]')
+            setIsProcessing(true)
+            streamingComponentsRef.current = []
+            setStreamingComponents([])
+        },
+        // 添加思考日志组件
+        onThoughtLog: (data: ThoughtLogEventData) => {
+            //console.log('[ThoughtLog]', data)
+            addStreamingComponent({
+                id: generateComponentId('thought'),
+                widgetType: 'ThoughtLogItem',
+                props: {
+                    node: data.node,
+                    message: data.message,
+                    progress: data.progress,
+                    metadata: data.metadata,
+                    timestamp: Date.now(),
+                },
+            })
+        },
+        // 添加增强提示组件
+        onEnhancedPrompt: (data: EnhancedPromptEventData) => {
+            addStreamingComponent({
+                id: generateComponentId('enhanced'),
+                widgetType: 'EnhancedPromptView',
+                props: {
+                    original: data.original,
+                    retrieved: data.retrieved,
+                    final: data.final,
+                },
+            })
+        },
+        // 添加通用 UI 组件
+        onGenUIComponent: (data: GenUIComponentEventData) => {
+            const component: GenUIComponent = {
+                id:
+                    data.id ||
+                    generateComponentId(data.widgetType.toLowerCase()),
+                widgetType: data.widgetType as GenUIComponent['widgetType'],
+                props: data.props as GenUIComponent['props'],
+                updateMode: data.updateMode,
+                targetId: data.targetId,
+            }
+
+            if (data.updateMode && data.updateMode !== 'append') {
+                updateStreamingComponent(component)
+            } else {
+                addStreamingComponent(component)
+            }
+        },
+        // 处理聊天结束事件
+        onChatEnd: () => {
+            const componentsToSave = streamingComponentsRef.current
+            const sessionIdToSave = sessionIdWhenSendRef.current
+
+            setTurns((prev) => [
+                ...prev,
+                {
+                    id: `assistant_${Date.now()}`,
+                    role: 'assistant',
+                    content: 'AI 响应',
+                    timestamp: Date.now(),
+                    genUIComponents: componentsToSave,
+                },
+            ])
+            console.log('[onChatEnd] RESET]')
+            setIsProcessing(false)
+            streamingComponentsRef.current = []
+            setStreamingComponents([])
+
+            if (sessionIdToSave && componentsToSave.length > 0) {
+                MessageService.saveAssistantMessage(
+                    sessionIdToSave,
+                    'AI 响应',
+                    componentsToSave
+                )
+                    .then(() => {
+                        console.log(
+                            '[ChatInterface] Assistant message saved with',
+                            componentsToSave.length,
+                            'components'
+                        )
+                        loadSessions()
+                    })
+                    .catch((error) => {
+                        console.error(
+                            '[ChatInterface] Failed to save assistant message:',
+                            error
+                        )
+                    })
+            }
+            // 调用外部 onChatEnd 回调（如果有）
+            onChatEnd?.()
+        },
+        // 处理状态变更事件（可选）
+        onStatusChange: (status) => {
+            if (status === 'idle' && !isProcessing) {
+                // Reset logic if needed
+            }
+        },
+    })
+
+    // =====处理 GenUI 组件事件=====！！！
+    useEffect(() => {
+        const handler = (
+            e: CustomEvent<{ actionId: string; imageUrl?: string }>
+        ) => {
+            if (e.detail?.actionId === 'edit_mask_btn' && e.detail.imageUrl) {
+                setMaskDrawImageUrl(e.detail.imageUrl)
+                return
+            }
+            if (e.detail?.actionId !== 'regenerate_btn' || isProcessing) return
+            const userTurns = turns.filter((t) => t.role === 'user')
+            const lastUser = userTurns.pop()
+            if (lastUser?.content) {
+                const previousPrompts = userTurns.map((t) => t.content)
+                setTurns((prev) => {
+                    const next = [...prev]
+                    if (next[next.length - 1]?.role === 'assistant') {
+                        next.pop()
+                    }
+                    return next
+                })
+                sendMessage(lastUser.content, { previousPrompts })
+            }
+        }
+        window.addEventListener('genui-action', handler as EventListener)
+        return () =>
+            window.removeEventListener('genui-action', handler as EventListener)
+    }, [turns, isProcessing, sendMessage])
+
+    // =====智能画布监听事件处理=====！！！
+    useEffect(() => {
+        const handler = (
+            e: CustomEvent<{ maskData: { base64: string; imageUrl: string } }>
+        ) => {
+            const maskData = e.detail?.maskData
+            if (!maskData || !currentSessionId) return
+            setMaskDrawImageUrl(null)
+
+            // 保存 sessionId 以便 onChatEnd 时能正确保存 AI 响应到数据库
+            sessionIdWhenSendRef.current = currentSessionId
+
+            const userTurn: ChatTurn = {
+                id: `temp_${Date.now()}`,
+                role: 'user',
+                content: '修改这里',
+                timestamp: Date.now(),
+            }
+            setTurns((prev) => [...prev, userTurn])
+            MessageService.saveUserMessage(currentSessionId, '修改这里').catch(
+                console.error
+            )
+            sendMessage('修改这里', { maskData })
+        }
+        window.addEventListener('smart-canvas-mask', handler as EventListener)
+        return () =>
+            window.removeEventListener(
+                'smart-canvas-mask',
+                handler as EventListener
+            )
+    }, [sendMessage, currentSessionId])
+
+    // =====处理滚动事件=====！！！
+    const handleScroll = useCallback(() => {
+        const container = scrollRef.current
+        if (!container) return
+        const distanceToBottom =
+            container.scrollHeight - //内容总高度 - 滚动条位置 - 可见区域高度 = 距离底部高度
+            container.scrollTop - //当前滚动位置
+            container.clientHeight //可见区域高度
+        const isNearBottom = distanceToBottom < 20
+        setIsAutoScroll(isNearBottom) // 当距离底部不足20像素时自动滚动，若超过20像素则不自动滚动
+        setShowScrollToBottom(distanceToBottom > 300) //当距离底部超过300像素时显示按钮
+    }, [])
+
+    // =====处理滚动到底部事件=====！！！当用户触发滚动时激活
+    const scrollToBottom = useCallback(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+        setIsAutoScroll(true)
+        setShowScrollToBottom(false)
+    }, [])
+
+    // =====监听滚动事件=====！！！监听器判断内容高度和宽度变化时激活
+    useEffect(() => {
+        const container = scrollRef.current
+        if (!container || typeof ResizeObserver === 'undefined') {
+            return
+        }
+        //监听器，监听到滚动事件时判断是否需要自动滚动到底部
+        const observer = new ResizeObserver(() => {
+            if (isAutoScroll) {
+                scrollToBottom()
+            }
+        })
+        observer.observe(container)
+        return () => observer.disconnect()
+    }, [isAutoScroll, scrollToBottom])
+
+    // =====处理滚动到底部事件=====！！！当用户触发滚动时激活
+    useEffect(() => {
+        if (!isAutoScroll) return
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }, [turns, streamingComponents, isAutoScroll])
+
+    // =====处理发送消息事件====！！！当用户发送消息时激活
+    const handleSend = () => {
+        const text = input.trim()
+        if (!text || !currentSessionId) return
+
+        sessionIdWhenSendRef.current = currentSessionId
+
+        const userTurn: ChatTurn = {
+            id: `temp_${Date.now()}`,
+            role: 'user',
+            content: text,
+            timestamp: Date.now(),
+        }
+        setTurns((prev) => [...prev, userTurn])
+
+        MessageService.saveUserMessage(currentSessionId, text)
+            .then(() => {
+                console.log('[ChatInterface] User message saved')
+            })
+            .catch((error) => {
+                console.error(
+                    '[ChatInterface] Failed to save user message:',
+                    error
+                )
+            })
+        // 发送消息时包含之前的用户消息作为上下文
+        const previousPrompts = turns
+            .filter((t) => t.role === 'user')
+            .map((t) => t.content)
+        sendMessage(text, { previousPrompts })
+        setInput('')
+    }
+    // =====处理发送消息事件=====
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            handleSend()
+        }
+    }
+
+    return (
+        <div className="flex flex-col h-full bg-background/50 relative">
+            {/* 聊天内容区域 flex-1 占满剩余空间,防止底部输入框遮挡  */}
+            <div
+                className="flex-1 overflow-y-auto min-h-0 p-4 scroll-smooth"
+                ref={scrollRef} //绑定div,可以在事件中获取滚动位置,以改变自动滚动状态
+                onScroll={handleScroll}
+            >
+                <div className="mx-auto space-y-8 pb-4">
+                    {/* 欢迎/空状态 */}
+                    {turns.length === 0 &&
+                        streamingComponents.length === 0 &&
+                        !isProcessing && (
+                            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-6 animate-in fade-in zoom-in duration-500">
+                                <div className="w-16 h-16 bg-gradient-to-tr from-blue-500 to-purple-500 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20">
+                                    <Sparkles className="w-8 h-8 text-white" />
+                                </div>
+                                <div className="space-y-2">
+                                    <h2 className="text-2xl font-bold tracking-tight">
+                                        AI 创作助手
+                                    </h2>
+                                    <p className="text-muted-foreground max-w-md">
+                                        输入你的创意，我会帮你完成意图识别、风格检索、任务执行全流程
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                    {/* 按轮次交错展示：问题1 → 回答1 → 问题2 → 回答2 !!!这里是输出完成存入turns的对话内容*/}
+                    {turns.map((turn) =>
+                        turn.role === 'user' ? (
+                            <div
+                                key={turn.id}
+                                className="flex justify-end animate-in slide-in-from-bottom-2"
+                            >
+                                <div className="max-w-[85%] bg-primary text-primary-foreground px-5 py-3 rounded-2xl rounded-tr-sm shadow-sm">
+                                    <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                                        {turn.content}
+                                    </p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div key={turn.id}>
+                                {turn.genUIComponents &&
+                                    turn.genUIComponents.length > 0 && (
+                                        <GenUIComponentRenderer
+                                            components={turn.genUIComponents}
+                                            isProcessing={false}
+                                            onImageLoad={scrollToBottom}
+                                            maskDrawImageUrl={maskDrawImageUrl}
+                                        />
+                                    )}
+                            </div>
+                        )
+                    )}
+
+                    {/* 当前正在流式输出的 AI 响应 !!! 这里是正在输出还未存入的内容? 对比上面回答的渲染和这里回答的渲染参数区别*/}
+                    {(streamingComponents.length > 0 || isProcessing) && (
+                        <GenUIComponentRenderer
+                            components={streamingComponents}
+                            isProcessing={isProcessing}
+                            onImageLoad={scrollToBottom}
+                            maskDrawImageUrl={maskDrawImageUrl}
+                        />
+                    )}
+
+                    <div ref={bottomRef} className="h-4" />
+                </div>
+            </div>
+
+            {/* 滚动到底部按钮 - 绝对定位 */}
+            {showScrollToBottom && (
+                <div className="absolute bottom-32 right-6 z-30">
+                    <Button
+                        size="icon"
+                        variant="secondary"
+                        onClick={scrollToBottom}
+                        aria-label="Scroll to bottom"
+                        className="h-8 w-8  shadow-lg"
+                    >
+                        <ArrowDown className="h-5 w-5" />
+                    </Button>
+                </div>
+            )}
+
+            {/* 底部输入框 - 固定定位 flex-shrink-0 禁止收缩,保持固定高度*/}
+            <div className="flex-shrink-0 bg-background/80 backdrop-blur-md border-t p-4 pb-6 z-20">
+                <div className="mx-auto relative">
+                    <Textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder={placeholder}
+                        disabled={isProcessing}
+                        className="min-h-[52px] max-h-[200px] resize-none pr-14 py-3.5 rounded-xl shadow-sm border-muted-foreground/20 focus-visible:ring-blue-500/20 [&::placeholder]:whitespace-nowrap [&::placeholder]:overflow-hidden [&::placeholder]:text-ellipsis"
+                        rows={1}
+                    />
+                    <Button
+                        onClick={handleSend}
+                        disabled={!input.trim() || isProcessing}
+                        size="icon"
+                        className={cn(
+                            'absolute right-1.5 top-1.5 h-10 w-10 rounded-lg transition-all',
+                            input.trim()
+                                ? 'bg-blue-600 hover:bg-blue-700'
+                                : 'bg-muted text-muted-foreground hover:bg-muted'
+                        )}
+                    >
+                        {isProcessing ? (
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                        ) : (
+                            <Send className="h-5 w-5" />
+                        )}
+                    </Button>
+                    <div className="text-[10px] text-muted-foreground mt-2 text-center opacity-70">
+                        AiVista Agent • 由大型语言模型驱动
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}

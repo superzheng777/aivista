@@ -1,0 +1,44 @@
+# 忽略所有 Markdown，仅保留根目录 README
+*.md
+**/*.md
+!README.md
+!readme.md
+
+# 常规忽略规则
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+.DS_Store
+
+# IDE 和编辑器配置
+.cursor/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+.metadata
+.project
+.settings/
+
+# 测试和覆盖率
+coverage/
+.nyc_output/
+*.log
+
+# 本地发布草稿
+README_GITHUB_DRAFT.md
+
+# Local git init troubleshooting artifacts
+/.git-local/
+/gitrepo/
+/g2/
+/repo_git_test/
+/shortgit_test/
