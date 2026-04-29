@@ -9,7 +9,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Send, Loader2, Sparkles, ArrowDown } from 'lucide-react'
+import { Send, Loader2, Sparkles, ArrowDown, X } from 'lucide-react'
 import { useAgentChat } from '@/hooks/use-sse'
 import {
     ThoughtLogEventData, //AI 思考日志事件数据
@@ -22,6 +22,7 @@ import {
     generateComponentId,
     ensureGenUIRegistryInitialized,
 } from '@/genui'
+import type { MaskData } from '@/genui'
 import { cn } from '@/lib/utils'
 import { useSessionStore } from '@/stores/session-store'
 import { MessageService } from '@/lib/services/message-service'
@@ -248,8 +249,12 @@ export function ChatInterface({
     const [maskDrawImageUrl, setMaskDrawImageUrl] = useState<string | null>(
         null
     ) //智能画布绘制的图片 URL
+    const [pendingMaskData, setPendingMaskData] = useState<MaskData | null>(
+        null
+    ) // 等待用户补充编辑说明的蒙版数据
 
     const sessionIdWhenSendRef = useRef<string | null>(null)
+    const inputRef = useRef<HTMLTextAreaElement>(null)
 
     // ========== 会话管理 ==========
     const { currentSessionId, createSession, loadSessions } = useSessionStore()
@@ -524,6 +529,7 @@ export function ChatInterface({
             e: CustomEvent<{ actionId: string; imageUrl?: string }>
         ) => {
             if (e.detail?.actionId === 'edit_mask_btn' && e.detail.imageUrl) {
+                setPendingMaskData(null)
                 setMaskDrawImageUrl(e.detail.imageUrl)
                 return
             }
@@ -550,26 +556,14 @@ export function ChatInterface({
     // =====智能画布监听事件处理=====！！！
     useEffect(() => {
         const handler = (
-            e: CustomEvent<{ maskData: { base64: string; imageUrl: string } }>
+            e: CustomEvent<{ maskData: MaskData }>
         ) => {
             const maskData = e.detail?.maskData
-            if (!maskData || !currentSessionId) return
+            if (!maskData) return
             setMaskDrawImageUrl(null)
-
-            // 保存 sessionId 以便 onChatEnd 时能正确保存 AI 响应到数据库
-            sessionIdWhenSendRef.current = currentSessionId
-
-            const userTurn: ChatTurn = {
-                id: `temp_${Date.now()}`,
-                role: 'user',
-                content: '修改这里',
-                timestamp: Date.now(),
-            }
-            setTurns((prev) => [...prev, userTurn])
-            MessageService.saveUserMessage(currentSessionId, '修改这里').catch(
-                console.error
-            )
-            sendMessage('修改这里', { maskData })
+            setPendingMaskData(maskData)
+            setInput('')
+            requestAnimationFrame(() => inputRef.current?.focus())
         }
         window.addEventListener('smart-canvas-mask', handler as EventListener)
         return () =>
@@ -577,7 +571,23 @@ export function ChatInterface({
                 'smart-canvas-mask',
                 handler as EventListener
             )
-    }, [sendMessage, currentSessionId])
+    }, [])
+
+    useEffect(() => {
+        const handler = (e: CustomEvent<{ imageUrl?: string }>) => {
+            const imageUrl = e.detail?.imageUrl
+            if (!imageUrl || imageUrl !== maskDrawImageUrl) return
+            setMaskDrawImageUrl(null)
+            setPendingMaskData(null)
+        }
+
+        window.addEventListener('smart-canvas-cancel', handler as EventListener)
+        return () =>
+            window.removeEventListener(
+                'smart-canvas-cancel',
+                handler as EventListener
+            )
+    }, [maskDrawImageUrl])
 
     // =====处理滚动事件=====！！！
     const handleScroll = useCallback(() => {
@@ -646,11 +656,17 @@ export function ChatInterface({
                     error
                 )
             })
-        // 发送消息时包含之前的用户消息作为上下文
-        const previousPrompts = turns
-            .filter((t) => t.role === 'user')
-            .map((t) => t.content)
-        sendMessage(text, { previousPrompts })
+        // 局部重绘需要同时提交蒙版和用户明确的编辑说明。
+        if (pendingMaskData) {
+            sendMessage(text, { maskData: pendingMaskData })
+            setPendingMaskData(null)
+        } else {
+            // 发送消息时包含之前的用户消息作为上下文
+            const previousPrompts = turns
+                .filter((t) => t.role === 'user')
+                .map((t) => t.content)
+            sendMessage(text, { previousPrompts })
+        }
         setInput('')
     }
     // =====处理发送消息事件=====
@@ -749,11 +765,33 @@ export function ChatInterface({
             {/* 底部输入框 - 固定定位 flex-shrink-0 禁止收缩,保持固定高度*/}
             <div className="flex-shrink-0 bg-background/80 backdrop-blur-md border-t p-4 pb-6 z-20">
                 <div className="mx-auto relative">
+                    {pendingMaskData && (
+                        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                            <span>
+                                已选择局部重绘区域，请输入希望把该区域改成什么样。
+                            </span>
+                            <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 shrink-0 text-blue-900 hover:bg-blue-100"
+                                onClick={() => setPendingMaskData(null)}
+                                aria-label="取消局部重绘"
+                            >
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    )}
                     <Textarea
+                        ref={inputRef}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder={placeholder}
+                        placeholder={
+                            pendingMaskData
+                                ? '描述局部重绘要求，如：把这里改成机械手臂'
+                                : placeholder
+                        }
                         disabled={isProcessing}
                         className="min-h-[52px] max-h-[200px] resize-none pr-14 py-3.5 rounded-xl shadow-sm border-muted-foreground/20 focus-visible:ring-blue-500/20 [&::placeholder]:whitespace-nowrap [&::placeholder]:overflow-hidden [&::placeholder]:text-ellipsis"
                         rows={1}

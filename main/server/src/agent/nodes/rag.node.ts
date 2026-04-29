@@ -119,6 +119,24 @@ export class RagNode {
       };
     }
 
+    if (state.intent.action === 'inpainting') {
+      this.logger.log('RAG Node: Inpainting task detected, skipping style retrieval');
+      return {
+        enhancedPrompt: {
+          original: state.userInput.text,
+          retrieved: [],
+          final: state.userInput.text,
+        },
+        thoughtLogs: [
+          {
+            node: 'rag',
+            message: '局部重绘任务使用用户编辑说明，不进行风格检索增强',
+            timestamp: Date.now(),
+          },
+        ],
+      };
+    }
+
     try {
       // 1. 构建检索查询
       // 优化策略：优先使用风格关键词（权重最高），减少通用词的干扰

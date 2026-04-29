@@ -32,6 +32,10 @@ export function SmartCanvas({
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const imgRef = useRef<HTMLImageElement>(null)
 
+    useEffect(() => {
+        setInternalMode(mode)
+    }, [mode, imageUrl])
+
     // 图片加载完成时，设置图片尺寸
     const handleImageLoad = useCallback(() => {
         if (imgRef.current) {
@@ -65,7 +69,7 @@ export function SmartCanvas({
 
     // 绘制蒙版到 canvas ！！！
     useEffect(() => {
-        if (!canvasRef.current || mode !== 'draw_mask') return
+        if (!canvasRef.current || internalMode !== 'draw_mask') return
         const canvas = canvasRef.current
         const ctx = canvas.getContext('2d')
         if (!ctx) return
@@ -84,7 +88,7 @@ export function SmartCanvas({
             }
             ctx.stroke()
         })
-    }, [maskPaths, currentPath, mode])
+    }, [maskPaths, currentPath, internalMode])
 
     // 转换 canvas 坐标 ！！！
     const getCanvasPoint = useCallback(
@@ -106,7 +110,7 @@ export function SmartCanvas({
     // 开始绘制（鼠标按下）
     const handlePointerDown = useCallback(
         (e: React.PointerEvent) => {
-            if (mode !== 'draw_mask') return
+            if (internalMode !== 'draw_mask') return
             const point = getCanvasPoint(e.clientX, e.clientY)
             if (point) {
                 e.currentTarget.setPointerCapture(e.pointerId)
@@ -114,19 +118,19 @@ export function SmartCanvas({
                 setCurrentPath([point]) // 开始新路径，只有一个起点
             }
         },
-        [mode, getCanvasPoint]
+        [internalMode, getCanvasPoint]
     )
 
     // 绘制路径（鼠标移动）
     const handlePointerMove = useCallback(
         (e: React.PointerEvent) => {
-            if (!isDrawing || mode !== 'draw_mask') return
+            if (!isDrawing || internalMode !== 'draw_mask') return
             const point = getCanvasPoint(e.clientX, e.clientY)
             if (point) {
                 setCurrentPath((prev) => [...prev, point]) // 添加新点到当前路径
             }
         },
-        [isDrawing, mode, getCanvasPoint]
+        [isDrawing, internalMode, getCanvasPoint]
     )
 
     // 结束绘制（鼠标抬起）
@@ -149,7 +153,10 @@ export function SmartCanvas({
         // 可选：清除当前绘制的蒙版
         setMaskPaths([])
         setCurrentPath([])
-    }, [])
+        window.dispatchEvent(
+            new CustomEvent('smart-canvas-cancel', { detail: { imageUrl } })
+        )
+    }, [imageUrl])
 
     // 导出蒙版数据 ！！！
     const exportMask = useCallback((): MaskData | null => {
