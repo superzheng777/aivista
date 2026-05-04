@@ -1,4 +1,4 @@
-import {
+﻿import {
     Injectable,
     Logger,
     OnModuleInit,
@@ -13,12 +13,11 @@ import * as fs from 'fs/promises'
 import { IEmbeddingService } from './interfaces/embedding-service.interface'
 import { INITIAL_STYLES, StyleData } from './data/initial-styles'
 import { UpdateStyleDto } from './dto/update-style.dto'
-import { parseBooleanEnv } from 'src/config/config.util'
+import { parseBooleanEnv } from '../config/config.util'
 
 /**
- * 系统内置样式ID列表
- * 这些样式不可删除，只能修改部分字段
- */
+ * 绯荤粺鍐呯疆鏍峰紡ID鍒楄〃
+ * 杩欎簺鏍峰紡涓嶅彲鍒犻櫎锛屽彧鑳戒慨鏀归儴鍒嗗瓧娈? */
 export const SYSTEM_STYLE_IDS = [
     'style_001', // Cyberpunk
     'style_002', // Watercolor
@@ -38,34 +37,32 @@ export const SYSTEM_STYLE_IDS = [
 ] as const
 
 /**
- * 检索到的风格数据
- */
+ * 妫€绱㈠埌鐨勯鏍兼暟鎹? */
 export interface RetrievedStyle {
+    id: string
     style: string
     prompt: string
+    description?: string
+    tags: string[]
     similarity: number
     metadata?: Record<string, any>
 }
 
 /**
- * 检索选项
+ * 妫€绱㈤€夐」
  */
 export interface SearchOptions {
     limit?: number
+    recallLimit?: number
     minSimilarity?: number
 }
 
 /**
- * 知识库服务
- *
- * @Injectable() - 标记为可注入的服务类
- * @OnModuleInit() - 实现模块初始化钩子，启动时自动初始化知识库
- *
- * 职责：
- * - LanceDB 数据库管理
- * - 风格数据的 CRUD 操作
- * - 向量检索功能
- * - 启动时自动初始化数据
+ * 鐭ヨ瘑搴撴湇鍔? *
+ * @Injectable() - 鏍囪涓哄彲娉ㄥ叆鐨勬湇鍔＄被
+ * @OnModuleInit() - 瀹炵幇妯″潡鍒濆鍖栭挬瀛愶紝鍚姩鏃惰嚜鍔ㄥ垵濮嬪寲鐭ヨ瘑搴? *
+ * 鑱岃矗锛? * - LanceDB 鏁版嵁搴撶鐞? * - 椋庢牸鏁版嵁鐨?CRUD 鎿嶄綔
+ * - 鍚戦噺妫€绱㈠姛鑳? * - 鍚姩鏃惰嚜鍔ㄥ垵濮嬪寲鏁版嵁
  */
 @Injectable()
 export class KnowledgeService implements OnModuleInit {
@@ -81,26 +78,26 @@ export class KnowledgeService implements OnModuleInit {
         @Inject('EMBEDDING_SERVICE')
         private readonly embeddingService: IEmbeddingService
     ) {
-        // 获取数据库路径
+        // 鑾峰彇鏁版嵁搴撹矾寰?
         this.dbPath =
             this.configService.get<string>('VECTOR_DB_PATH') || './data/lancedb'
     }
 
     /**
-     * 模块初始化时自动执行
+     * 妯″潡鍒濆鍖栨椂鑷姩鎵ц
      */
     async onModuleInit() {
         await this.initialize()
 
-        // 数据库迁移已废弃
-        // 新初始化的数据库schema已正确，无需迁移
+        // 鏁版嵁搴撹縼绉诲凡搴熷純
+        // 鏂板垵濮嬪寲鐨勬暟鎹簱schema宸叉纭紝鏃犻渶杩佺Щ
         // await this.migrateDatabase();
     }
 
     /**
-     * 初始化知识库
-     * - 检查数据库是否存在
-     * - 如果不存在或强制初始化，创建数据库并加载初始数据
+     * 鍒濆鍖栫煡璇嗗簱
+     * - 妫€鏌ユ暟鎹簱鏄惁瀛樺湪
+     * - 濡傛灉涓嶅瓨鍦ㄦ垨寮哄埗鍒濆鍖栵紝鍒涘缓鏁版嵁搴撳苟鍔犺浇鍒濆鏁版嵁
      */
     async initialize(): Promise<void> {
         if (this.isInitialized) {
@@ -108,11 +105,11 @@ export class KnowledgeService implements OnModuleInit {
         }
 
         try {
-            // 确保目录存在
+            // 纭繚鐩綍瀛樺湪
             const dbDir = path.dirname(this.dbPath)
             await fs.mkdir(dbDir, { recursive: true })
 
-            // 检查数据库是否已存在
+            // 妫€鏌ユ暟鎹簱鏄惁宸插瓨鍦?
             const dbExists = await this.checkDatabaseExists()
             const forceInit = parseBooleanEnv(
                 this.configService.get<string>('FORCE_INIT_KNOWLEDGE_BASE')
@@ -131,15 +128,15 @@ export class KnowledgeService implements OnModuleInit {
                 this.logger.log(
                     'Force initialization enabled, reinitializing knowledge base...'
                 )
-                // 删除现有数据库
+                // 鍒犻櫎鐜版湁鏁版嵁搴?
                 try {
                     await fs.rm(this.dbPath, { recursive: true, force: true })
                 } catch (error) {
-                    // 忽略删除错误
+                    // 蹇界暐鍒犻櫎閿欒
                 }
             }
 
-            // 创建数据库并初始化数据
+            // 鍒涘缓鏁版嵁搴撳苟鍒濆鍖栨暟鎹?
             await this.createDatabase()
             await this.insertInitialStyles()
 
@@ -157,7 +154,7 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 检查数据库是否存在
+     * 妫€鏌ユ暟鎹簱鏄惁瀛樺湪
      */
     private async checkDatabaseExists(): Promise<boolean> {
         try {
@@ -169,8 +166,7 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 打开现有数据库
-     */
+     * 鎵撳紑鐜版湁鏁版嵁搴?     */
     private async openDatabase(): Promise<void> {
         try {
             this.db = await lancedb.connect(this.dbPath)
@@ -186,7 +182,7 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 创建新数据库
+     * 鍒涘缓鏂版暟鎹簱
      */
     private async createDatabase(): Promise<void> {
         try {
@@ -202,7 +198,7 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 插入初始风格数据
+     * 鎻掑叆鍒濆椋庢牸鏁版嵁
      */
     private async insertInitialStyles(): Promise<void> {
         if (!this.db) {
@@ -214,14 +210,14 @@ export class KnowledgeService implements OnModuleInit {
                 `Generating embeddings for ${INITIAL_STYLES.length} styles...`
             )
 
-            // 生成向量嵌入
+            // 鐢熸垚鍚戦噺宓屽叆
             const texts = INITIAL_STYLES.map(
                 (style) =>
                     `${style.style} ${style.prompt} ${style.description || ''}`
             )
             const embeddings = await this.embeddingService.embedBatch(texts)
 
-            // 准备数据，主要是加入vector字段，用于向量检索
+            // 鍑嗗鏁版嵁锛屼富瑕佹槸鍔犲叆vector瀛楁锛岀敤浜庡悜閲忔绱?
             const data = INITIAL_STYLES.map((style, index) => ({
                 id: style.id,
                 style: style.style,
@@ -235,7 +231,7 @@ export class KnowledgeService implements OnModuleInit {
                 updatedAt: style.updatedAt || new Date(),
             }))
 
-            // 创建表并插入数据
+            // 鍒涘缓琛ㄥ苟鎻掑叆鏁版嵁
             this.table = await this.db.createTable(this.tableName, data)
             this.logger.log(
                 `Created table and inserted ${data.length} styles into knowledge base`
@@ -250,12 +246,10 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 向量检索
-     *
-     * @param query - 查询文本
-     * @param options - 检索选项
-     * @returns 检索到的风格列表
-     */
+     * 鍚戦噺妫€绱?     *
+     * @param query - 鏌ヨ鏂囨湰
+     * @param options - 妫€绱㈤€夐」
+     * @returns 妫€绱㈠埌鐨勯鏍煎垪琛?     */
     async search(
         query: string,
         options: SearchOptions = {}
@@ -268,7 +262,7 @@ export class KnowledgeService implements OnModuleInit {
         }
 
         try {
-            // 检查数据库状态
+            // 妫€鏌ユ暟鎹簱鐘舵€?
             const dbCount = await this.count()
             if (dbCount === 0) {
                 this.logger.warn(
@@ -278,14 +272,15 @@ export class KnowledgeService implements OnModuleInit {
             }
 
             const limit = options.limit || 3
+            const recallLimit = Math.max(options.recallLimit || limit, limit)
             const minSimilarity = options.minSimilarity || 0.4
 
-            // 生成查询向量
+            // 鐢熸垚鏌ヨ鍚戦噺
             const queryVector = await this.embeddingService.embed(query)
 
-            // 执行向量搜索 ！！！
-            // @lancedb/lancedb API: search() 返回一个查询对象，可以链式调用 limit() 和 toArray()
-            // 显式选择需要的字段，包括 vector 字段用于计算相似度
+            // 鎵ц鍚戦噺鎼滅储 锛侊紒锛?
+            // @lancedb/lancedb API: search() 杩斿洖涓€涓煡璇㈠璞★紝鍙互閾惧紡璋冪敤 limit() 鍜?toArray()
+            // 鏄惧紡閫夋嫨闇€瑕佺殑瀛楁锛屽寘鎷?vector 瀛楁鐢ㄤ簬璁＄畻鐩镐技搴?
             const searchQuery = this.table.search(queryVector)
             const limitedQuery = searchQuery
                 .select([
@@ -296,8 +291,8 @@ export class KnowledgeService implements OnModuleInit {
                     'tags',
                     'metadata',
                     'vector',
-                ]) // 显式选择字段，包括 vector
-                .limit(limit * 2) // 获取更多结果，因为后续会过滤
+                ]) // 鏄惧紡閫夋嫨瀛楁锛屽寘鎷?vector
+                .limit(Math.max(recallLimit * 2, limit * 2)) // 鑾峰彇鏇村缁撴灉锛屽洜涓哄悗缁細杩囨护
             const results = await limitedQuery.toArray()
 
             if (results.length === 0) {
@@ -306,13 +301,13 @@ export class KnowledgeService implements OnModuleInit {
                 )
             }
 
-            // 转换结果格式 ！！！
-            // LanceDB 返回的结果包含向量和距离信息
+            // 杞崲缁撴灉鏍煎紡 锛侊紒锛?
+            // LanceDB 杩斿洖鐨勭粨鏋滃寘鍚悜閲忓拰璺濈淇℃伅
             const retrievedStyles: RetrievedStyle[] = results.map(
                 (result: any) => {
                     let similarity = 0
 
-                    // 优先使用 vector 字段计算余弦相似度
+                    // 浼樺厛浣跨敤 vector 瀛楁璁＄畻浣欏鸡鐩镐技搴?
                     if (
                         result.vector &&
                         Array.isArray(result.vector) &&
@@ -329,15 +324,15 @@ export class KnowledgeService implements OnModuleInit {
                             result.vector
                         )
                     }
-                    // 使用距离字段转换为相似度（LanceDB 的标准方式）
+                    // 浣跨敤璺濈瀛楁杞崲涓虹浉浼煎害锛圠anceDB 鐨勬爣鍑嗘柟寮忥級
                     else if (
                         result._distance !== undefined ||
                         result.distance !== undefined
                     ) {
                         const distance = result._distance || result.distance
-                        // L2 距离转换为相似度
-                        // 使用归一化方法：similarity = 1 / (1 + distance / scale_factor)
-                        const scaleFactor = 10000 // 基于观察到的距离值范围（7000-17000）
+                        // L2 璺濈杞崲涓虹浉浼煎害
+                        // 浣跨敤褰掍竴鍖栨柟娉曪細similarity = 1 / (1 + distance / scale_factor)
+                        const scaleFactor = 10000 // 鍩轰簬瑙傚療鍒扮殑璺濈鍊艰寖鍥达紙7000-17000锛?
                         similarity = 1 / (1 + distance / scaleFactor)
                     } else {
                         this.logger.warn(
@@ -347,8 +342,11 @@ export class KnowledgeService implements OnModuleInit {
                     }
 
                     return {
+                        id: result.id,
                         style: result.style,
                         prompt: result.prompt,
+                        description: result.description || '',
+                        tags: Array.isArray(result.tags) ? result.tags : [],
                         similarity,
                         metadata: result.metadata
                             ? typeof result.metadata === 'string'
@@ -359,22 +357,22 @@ export class KnowledgeService implements OnModuleInit {
                 }
             )
 
-            // 过滤掉 null 值，然后过滤低于阈值的，按相似度降序排序，限制返回数量
+            // 杩囨护鎺?null 鍊硷紝鐒跺悗杩囨护浣庝簬闃堝€肩殑锛屾寜鐩镐技搴﹂檷搴忔帓搴忥紝闄愬埗杩斿洖鏁伴噺
             const filteredStyles = retrievedStyles
-                .filter((item): item is RetrievedStyle => item !== null) // 过滤掉 null
-                .filter((item) => item.similarity >= minSimilarity) // 过滤低于阈值的
-                .sort((a, b) => b.similarity - a.similarity) // 按相似度降序排序
-                .slice(0, limit) // 限制返回数量
+                .filter((item): item is RetrievedStyle => item !== null) // 杩囨护鎺?null
+                .filter((item) => item.similarity >= minSimilarity) // 杩囨护浣庝簬闃堝€肩殑
+                .sort((a, b) => b.similarity - a.similarity) // 鎸夌浉浼煎害闄嶅簭鎺掑簭
+                .slice(0, recallLimit) // 闄愬埗杩斿洖鏁伴噺
 
             const similarities = filteredStyles
-                .map((r) => r.similarity.toFixed(2)) // 保留两位小数
-                .join(', ') // 用逗号分隔
+                .map((r) => r.similarity.toFixed(2)) // 淇濈暀涓や綅灏忔暟
+                .join(', ') // 鐢ㄩ€楀彿鍒嗛殧
             this.logger.log(
-                `Retrieved ${filteredStyles.length} styles for query: "${query}" (similarities: ${similarities})`
+                `Retrieved ${filteredStyles.length} candidate styles for query: "${query}" (similarities: ${similarities})`
             )
 
             if (filteredStyles.length === 0 && results.length > 0) {
-                // 计算所有结果的相似度（包括被过滤的）
+                // 璁＄畻鎵€鏈夌粨鏋滅殑鐩镐技搴︼紙鍖呮嫭琚繃婊ょ殑锛?
                 const allSimilarities = results
                     .map((r: any) => {
                         if (
@@ -389,8 +387,7 @@ export class KnowledgeService implements OnModuleInit {
                         }
                         return 0
                     })
-                    .filter((s) => !isNaN(s) && isFinite(s)) // 过滤掉无效值
-
+                    .filter((s) => !isNaN(s) && isFinite(s)) // 杩囨护鎺夋棤鏁堝€?
                 const maxSimilarity =
                     allSimilarities.length > 0
                         ? Math.max(...allSimilarities)
@@ -406,14 +403,14 @@ export class KnowledgeService implements OnModuleInit {
                 `Vector search failed for query: "${query}": ${error.message}`,
                 error.stack
             )
-            // 检索失败时返回空数组，不中断工作流
+            // 妫€绱㈠け璐ユ椂杩斿洖绌烘暟缁勶紝涓嶄腑鏂伐浣滄祦
             return []
         }
     }
 
     /**
-     * 将数据库记录转换为StyleData对象！！！（隔离数据库结构，若数据库结构变化，只需要修改这里MAP即可
-     * 处理JSON序列化的字段
+     * 灏嗘暟鎹簱璁板綍杞崲涓篠tyleData瀵硅薄锛侊紒锛侊紙闅旂鏁版嵁搴撶粨鏋勶紝鑻ユ暟鎹簱缁撴瀯鍙樺寲锛屽彧闇€瑕佷慨鏀硅繖閲孧AP鍗冲彲
+     * 澶勭悊JSON搴忓垪鍖栫殑瀛楁
      */
     private mapDbRecordToStyleData(record: any): StyleData {
         return {
@@ -433,8 +430,7 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 计算余弦相似度
-     */
+     * 璁＄畻浣欏鸡鐩镐技搴?     */
     private cosineSimilarity(vecA: number[], vecB: number[]): number {
         if (vecA.length !== vecB.length) {
             return 0
@@ -455,20 +451,19 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 添加新风格
-     */
+     * 娣诲姞鏂伴鏍?     */
     async addStyle(style: StyleData): Promise<void> {
         if (!this.table) {
             throw new Error('Knowledge base not initialized')
         }
 
         try {
-            // 生成向量嵌入
+            // 鐢熸垚鍚戦噺宓屽叆
             const text = `${style.style} ${style.prompt} ${style.description || ''}`
             const vector = await this.embeddingService.embed(text)
 
-            // 插入数据
-            // @lancedb/lancedb 使用 add() 方法添加数据
+            // 鎻掑叆鏁版嵁
+            // @lancedb/lancedb 浣跨敤 add() 鏂规硶娣诲姞鏁版嵁
             await this.table.add([
                 {
                     id: style.id,
@@ -495,24 +490,23 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 删除单个风格
-     * @param id 风格ID
-     * @throws ForbiddenException 如果是系统内置风格
-     */
+     * 鍒犻櫎鍗曚釜椋庢牸
+     * @param id 椋庢牸ID
+     * @throws ForbiddenException 濡傛灉鏄郴缁熷唴缃鏍?     */
     async deleteStyle(id: string): Promise<void> {
         if (!this.table) {
             throw new Error('Knowledge base not initialized')
         }
 
         try {
-            // 检查是否为系统内置
+            // 妫€鏌ユ槸鍚︿负绯荤粺鍐呯疆
             if (await this.isSystemStyle(id)) {
                 throw new ForbiddenException(
                     'Cannot delete system built-in style'
                 )
             }
 
-            // 从数据库删除
+            // 浠庢暟鎹簱鍒犻櫎
             await this.table.delete(`id = '${id}'`)
             this.logger.log(`Deleted style: ${id}`)
         } catch (error) {
@@ -528,8 +522,8 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 批量删除风格
-     * @param ids 风格ID数组
+     * 鎵归噺鍒犻櫎椋庢牸
+     * @param ids 椋庢牸ID鏁扮粍
      */
     async deleteStyles(
         ids: string[]
@@ -553,10 +547,10 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 更新单个风格
-     * @param id 风格ID
-     * @param updateData 更新数据
-     * @throws ForbiddenException 如果是系统内置风格且尝试修改核心字段
+     * 鏇存柊鍗曚釜椋庢牸
+     * @param id 椋庢牸ID
+     * @param updateData 鏇存柊鏁版嵁
+     * @throws ForbiddenException 濡傛灉鏄郴缁熷唴缃鏍间笖灏濊瘯淇敼鏍稿績瀛楁
      */
     async updateStyle(
         id: string,
@@ -567,7 +561,7 @@ export class KnowledgeService implements OnModuleInit {
         }
 
         try {
-            // 获取现有数据
+            // 鑾峰彇鐜版湁鏁版嵁
             const existingStyles = await this.table
                 .query()
                 .where(`id = '${id}'`)
@@ -581,9 +575,9 @@ export class KnowledgeService implements OnModuleInit {
             const existing = existingStyles[0]
             const isSystem = existing.isSystem || false
 
-            // 系统内置样式保护检查
+            // 绯荤粺鍐呯疆鏍峰紡淇濇姢妫€鏌?
             if (isSystem) {
-                // 只允许更新 description、tags、metadata 字段
+                // 鍙厑璁告洿鏂?description銆乼ags銆乵etadata 瀛楁
                 const allowedFields = ['description', 'tags', 'metadata']
                 const restrictedFields = Object.keys(updateData).filter(
                     (key) => !allowedFields.includes(key)
@@ -596,7 +590,7 @@ export class KnowledgeService implements OnModuleInit {
                 }
             }
 
-            // 检查核心文本是否变化，如果变化需要重新计算向量
+            // 妫€鏌ユ牳蹇冩枃鏈槸鍚﹀彉鍖栵紝濡傛灉鍙樺寲闇€瑕侀噸鏂拌绠楀悜閲?
             let newVector = existing.vector
             const styleText =
                 updateData.style !== undefined
@@ -624,7 +618,7 @@ export class KnowledgeService implements OnModuleInit {
                 newVector = await this.embeddingService.embed(text)
             }
 
-            // 构建更新对象，确保字段类型正确且不包含 LanceDB 可能附带的内部字段
+            // 鏋勫缓鏇存柊瀵硅薄锛岀‘淇濆瓧娈电被鍨嬫纭笖涓嶅寘鍚?LanceDB 鍙兘闄勫甫鐨勫唴閮ㄥ瓧娈?
             const updatedRecord: any = {
                 id: existing.id,
                 style: styleText,
@@ -634,14 +628,14 @@ export class KnowledgeService implements OnModuleInit {
                     updateData.tags !== undefined
                         ? updateData.tags
                         : existing.tags || [],
-                // 确保 metadata 始终是字符串
+                // 纭繚 metadata 濮嬬粓鏄瓧绗︿覆
                 metadata:
                     updateData.metadata !== undefined
                         ? JSON.stringify(updateData.metadata)
                         : typeof existing.metadata === 'string'
                           ? existing.metadata
                           : JSON.stringify(existing.metadata || {}),
-                // 确保 vector 是标准数组
+                // 纭繚 vector 鏄爣鍑嗘暟缁?
                 vector: Array.isArray(newVector)
                     ? newVector
                     : Array.from(newVector as any),
@@ -650,7 +644,7 @@ export class KnowledgeService implements OnModuleInit {
                 updatedAt: new Date(),
             }
 
-            // 优化：尝试使用 LanceDB 原生 update API
+            // 浼樺寲锛氬皾璇曚娇鐢?LanceDB 鍘熺敓 update API
             try {
                 await this.table.update(`id = '${id}'`, updatedRecord)
                 this.logger.log(`Updated style using native update API: ${id}`)
@@ -660,15 +654,15 @@ export class KnowledgeService implements OnModuleInit {
                     `Native update API failed, falling back to delete+add: ${updateError.message}`
                 )
 
-                // 降级方案：先删除后添加，但增加备份和回滚机制
-                // 备份当前数据
+                // 闄嶇骇鏂规锛氬厛鍒犻櫎鍚庢坊鍔狅紝浣嗗鍔犲浠藉拰鍥炴粴鏈哄埗
+                // 澶囦唤褰撳墠鏁版嵁
                 const backup = { ...existing }
 
                 try {
-                    // 执行删除
+                    // 鎵ц鍒犻櫎
                     await this.table.delete(`id = '${id}'`)
 
-                    // 执行添加
+                    // 鎵ц娣诲姞
                     await this.table.add([updatedRecord])
 
                     this.logger.log(
@@ -676,7 +670,7 @@ export class KnowledgeService implements OnModuleInit {
                     )
                     return this.mapDbRecordToStyleData(updatedRecord)
                 } catch (deleteAddError) {
-                    // 回滚：恢复备份数据
+                    // 鍥炴粴锛氭仮澶嶅浠芥暟鎹?
                     this.logger.error(
                         `Update failed, attempting rollback: ${deleteAddError.message}`
                     )
@@ -687,7 +681,7 @@ export class KnowledgeService implements OnModuleInit {
                         this.logger.error(
                             `Rollback failed for style ${id}: ${rollbackError.message}`
                         )
-                        // 回滚也失败了，记录到日志，让管理员手动处理
+                        // 鍥炴粴涔熷け璐ヤ簡锛岃褰曞埌鏃ュ織锛岃绠＄悊鍛樻墜鍔ㄥ鐞?
                     }
                     throw deleteAddError
                 }
@@ -708,16 +702,16 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 检查是否为系统内置风格
-     * @param id 风格ID
+     * 妫€鏌ユ槸鍚︿负绯荤粺鍐呯疆椋庢牸
+     * @param id 椋庢牸ID
      */
     private async isSystemStyle(id: string): Promise<boolean> {
-        // 首先检查是否在系统ID列表中
+        // 棣栧厛妫€鏌ユ槸鍚﹀湪绯荤粺ID鍒楄〃涓?
         if (SYSTEM_STYLE_IDS.includes(id as any)) {
             return true
         }
 
-        // 然后检查数据库中的 isSystem 标记
+        // 鐒跺悗妫€鏌ユ暟鎹簱涓殑 isSystem 鏍囪
         try {
             const styles = await this.table
                 .query()
@@ -735,8 +729,7 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 数据库迁移：为现有数据添加系统标记
-     */
+     * 鏁版嵁搴撹縼绉伙細涓虹幇鏈夋暟鎹坊鍔犵郴缁熸爣璁?     */
     private async migrateDatabase(): Promise<void> {
         if (!this.table) {
             this.logger.warn('Table not initialized, skipping migration')
@@ -744,7 +737,7 @@ export class KnowledgeService implements OnModuleInit {
         }
 
         try {
-            // 获取所有现有数据 - 使用零向量和大limit
+            // 鑾峰彇鎵€鏈夌幇鏈夋暟鎹?- 浣跨敤闆跺悜閲忓拰澶imit
             const dimension = this.embeddingService.getDimension()
             const zeroVector = new Array(dimension).fill(0)
             const allStyles = await this.table
@@ -757,10 +750,10 @@ export class KnowledgeService implements OnModuleInit {
                 return
             }
 
-            // 识别系统内置样式
+            // 璇嗗埆绯荤粺鍐呯疆鏍峰紡
             const systemIds = SYSTEM_STYLE_IDS
 
-            // 批量更新
+            // 鎵归噺鏇存柊
             const updates = allStyles.map((style) => {
                 const isSystemValue = systemIds.includes(style.id as any)
                 return {
@@ -772,7 +765,7 @@ export class KnowledgeService implements OnModuleInit {
             })
 
             if (updates.length > 0) {
-                // 采用先删除后添加的方式进行批量更新
+                // 閲囩敤鍏堝垹闄ゅ悗娣诲姞鐨勬柟寮忚繘琛屾壒閲忔洿鏂?
                 const ids = updates.map((u) => `'${u.id}'`).join(',')
                 await this.table.delete(`id IN (${ids})`)
                 await this.table.add(updates)
@@ -782,13 +775,12 @@ export class KnowledgeService implements OnModuleInit {
             }
         } catch (error) {
             this.logger.error('Database migration failed', error)
-            // 不抛出错误，避免阻止服务启动
+            // 涓嶆姏鍑洪敊璇紝閬垮厤闃绘鏈嶅姟鍚姩
         }
     }
 
     /**
-     * 获取所有风格
-     */
+     * 鑾峰彇鎵€鏈夐鏍?     */
     async getAllStyles(): Promise<StyleData[]> {
         if (!this.table) {
             this.logger.warn('Table not initialized')
@@ -796,7 +788,7 @@ export class KnowledgeService implements OnModuleInit {
         }
 
         try {
-            // 使用query()方法查询所有记录（不需要向量参数）
+            // 浣跨敤query()鏂规硶鏌ヨ鎵€鏈夎褰曪紙涓嶉渶瑕佸悜閲忓弬鏁帮級
             const results = await this.table.query().limit(10000).toArray()
 
             this.logger.log(`Retrieved ${results.length} styles from database`)
@@ -812,7 +804,7 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 根据ID获取单个风格
+     * 鏍规嵁ID鑾峰彇鍗曚釜椋庢牸
      */
     async getStyleById(id: string): Promise<StyleData | null> {
         if (!this.table) {
@@ -843,7 +835,7 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 获取风格数量
+     * 鑾峰彇椋庢牸鏁伴噺
      */
     async count(): Promise<number> {
         if (!this.table) {
@@ -864,8 +856,7 @@ export class KnowledgeService implements OnModuleInit {
     }
 
     /**
-     * 获取知识库统计信息
-     */
+     * 鑾峰彇鐭ヨ瘑搴撶粺璁′俊鎭?     */
     async getStats(): Promise<{ dimension: number; dbPath: string }> {
         const dimension = this.embeddingService.getDimension()
         return {
@@ -874,3 +865,5 @@ export class KnowledgeService implements OnModuleInit {
         }
     }
 }
+
+

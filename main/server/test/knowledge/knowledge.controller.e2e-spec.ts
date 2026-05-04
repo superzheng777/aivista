@@ -124,8 +124,10 @@ describe('KnowledgeController (e2e)', () => {
     it('should search styles', async () => {
       jest.spyOn(knowledgeService, 'search').mockResolvedValue([
         {
+          id: 'style_001',
           style: 'Cyberpunk',
           prompt: 'neon lights, high tech',
+          tags: [],
           similarity: 0.85,
           metadata: {},
         },

@@ -95,6 +95,18 @@ class EnvironmentVariables {
     @IsOptional()
     RAG_SEARCH_LIMIT?: number
 
+    @IsNumber()
+    @IsOptional()
+    RAG_HARD_MIN_SIMILARITY?: number
+
+    @IsNumber()
+    @IsOptional()
+    RAG_RERANK_THRESHOLD?: number
+
+    @IsNumber()
+    @IsOptional()
+    RAG_RECALL_LIMIT?: number
+
     // Critic 节点配置
     @IsNumber()
     @IsOptional()
