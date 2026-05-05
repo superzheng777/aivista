@@ -1,61 +1,48 @@
 /**
- * useSSE Hook
- * 提供与后端 SSE 连接的 React Hook
+ * useSSE / useAgentChat hooks.
  */
 
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { reportClientError } from '@/lib/monitoring/client-observability'
+import { createEventHandler, EventHandlerStrategy } from '@/lib/sse/event-handler'
 import { createSSEClient, SSEClient } from '@/lib/sse/sse-client'
 import {
-    createEventHandler,
-    EventHandlerStrategy,
-} from '@/lib/sse/event-handler'
-import {
-    SSEOptions,
-    SSEEvent,
-    SSEConnectionStatus,
-    ThoughtLogEventData,
     EnhancedPromptEventData,
-    GenUIComponentEventData,
     ErrorEventData,
+    GenUIComponentEventData,
+    SSEConnectionStatus,
+    SSEOptions,
+    SSEStatusChangeData,
+    ThoughtLogEventData,
 } from '@/lib/types/sse'
 
 interface UseSSEOptions extends Partial<SSEOptions> {
-    /**
-     * 是否自动连接
-     * @default true
-     */
     autoConnect?: boolean
-
-    /**
-     * 事件处理策略
-     */
     strategy?: EventHandlerStrategy
-
-    /**
-     * 连接状态变化回调
-     */
-    onStatusChange?: (status: any, sessionId: string | null) => void
+    onStatusChange?: (payload: SSEStatusChangeData) => void
 }
 
 interface UseSSEReturn {
-    // 连接状态
     status: SSEConnectionStatus
     sessionId: string | null
     error: Error | null
+    connectionState: SSEStatusChangeData | null
     isConnected: boolean
-
-    // 控制方法
     connect: () => Promise<void>
     disconnect: () => void
-    send: (body: any) => void
-
-    // 清理
+    send: (body: unknown) => void
     destroy: () => void
 }
 
-// useSSE Hook：提供与后端 SSE 连接的 React Hook，闭包模式，ref引用客户端
+function toError(error: unknown): Error {
+    if (error instanceof Error) {
+        return error
+    }
+    return new Error(typeof error === 'string' ? error : 'Unknown SSE error')
+}
+
 export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
     const {
         url = '/api/agent/chat',
@@ -68,16 +55,38 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
         timeout = 30000,
     } = options
 
-    // 状态
     const [status, setStatus] = useState<SSEConnectionStatus>('idle')
     const [sessionId, setSessionId] = useState<string | null>(null)
     const [error, setError] = useState<Error | null>(null)
+    const [connectionState, setConnectionState] =
+        useState<SSEStatusChangeData | null>(null)
 
-    // 客户端引用
     const clientRef = useRef<SSEClient | null>(null)
     const unsubscribeRef = useRef<(() => void) | null>(null)
 
-    // 创建客户端
+    const handleStatusChange = useCallback(
+        (payload: SSEStatusChangeData) => {
+            setStatus(payload.status)
+            setSessionId(payload.sessionId)
+            setConnectionState(payload)
+            setError(payload.errorMessage ? new Error(payload.errorMessage) : null)
+            onStatusChange?.(payload)
+        },
+        [onStatusChange]
+    )
+
+    const createClientHandler = useCallback(
+        (eventStrategy?: EventHandlerStrategy) =>
+            createEventHandler({
+                ...eventStrategy,
+                onStatusChange: (payload) => {
+                    handleStatusChange(payload)
+                    eventStrategy?.onStatusChange?.(payload)
+                },
+            }),
+        [handleStatusChange]
+    )
+
     useEffect(() => {
         const client = createSSEClient({
             url,
@@ -88,66 +97,103 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
         })
 
         clientRef.current = client
-
-        // 设置事件处理器 !!!
-        const handler = createEventHandler({
-            ...strategy,
-            onStatusChange: (newStatus: any, newSessionId) => {
-                setStatus(newStatus as SSEConnectionStatus)
-                setSessionId(newSessionId)
-                setError(null)
-                onStatusChange?.(newStatus, newSessionId)
-            },
-        })
-
-        // 监听所有事件 !!!
+        const handler = createClientHandler(strategy)
         const unsubscribe = client.on('*', handler)
         unsubscribeRef.current = unsubscribe
 
-        // 自动连接
         if (autoConnect && body) {
-            client.connect().catch((err) => {
-                console.error('[useSSE] Failed to connect:', err)
+            client.connect().catch((error) => {
+                const normalizedError = toError(error)
+                setError(normalizedError)
+                reportClientError({
+                    source: 'use-sse',
+                    message: normalizedError.message,
+                    sessionId: clientRef.current?.sessionId,
+                    status: clientRef.current?.status,
+                    eventType: 'status-change',
+                    extra: {
+                        action: 'auto-connect',
+                    },
+                })
             })
         }
 
-        // 清理函数
         return () => {
             unsubscribe()
             client.destroy()
         }
-    }, []) // 只在挂载时执行一次
+    }, [
+        autoConnect,
+        body,
+        createClientHandler,
+        maxRetries,
+        retryDelay,
+        strategy,
+        timeout,
+        url,
+    ])
 
-    // 连接方法
     const connect = useCallback(async () => {
         if (!clientRef.current) {
-            console.error('[useSSE] Client not initialized')
+            const error = new Error('SSE client not initialized')
+            setError(error)
+            reportClientError({
+                source: 'use-sse',
+                message: error.message,
+                status,
+                eventType: 'status-change',
+                extra: {
+                    action: 'connect',
+                },
+            })
             return
         }
 
-        await clientRef.current.connect()
-    }, [])
+        try {
+            await clientRef.current.connect()
+        } catch (error) {
+            const normalizedError = toError(error)
+            setError(normalizedError)
+            reportClientError({
+                source: 'use-sse',
+                message: normalizedError.message,
+                sessionId: clientRef.current.sessionId,
+                status: clientRef.current.status,
+                eventType: 'status-change',
+                extra: {
+                    action: 'connect',
+                },
+            })
+            throw normalizedError
+        }
+    }, [status])
 
-    // 断开连接方法
     const disconnect = useCallback(() => {
         if (!clientRef.current) {
-            console.error('[useSSE] Client not initialized')
+            const error = new Error('SSE client not initialized')
+            setError(error)
+            reportClientError({
+                source: 'use-sse',
+                message: error.message,
+                status,
+                eventType: 'status-change',
+                extra: {
+                    action: 'disconnect',
+                },
+            })
             return
         }
 
         clientRef.current.disconnect()
-    }, [])
+    }, [status])
 
-    // 发送消息方法（创建新连接）
     const send = useCallback(
-        (messageBody: any) => {
-            // 取消旧的事件订阅
+        (messageBody: unknown) => {
             if (unsubscribeRef.current) {
                 unsubscribeRef.current()
                 unsubscribeRef.current = null
             }
 
-            // 创建新客户端并连接
             const client = createSSEClient({
                 url,
                 body: messageBody,
@@ -157,39 +203,28 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
             })
 
             clientRef.current = client
-
-            // 设置事件处理器
-            const handler = createEventHandler({
-                ...strategy,
-                onStatusChange: (newStatus: any, newSessionId) => {
-                    setStatus(newStatus as SSEConnectionStatus)
-                    setSessionId(newSessionId)
-                    setError(null)
-                    onStatusChange?.(newStatus, newSessionId)
-                },
-            })
-
-            // 监听所有事件并保存取消订阅函数
+            const handler = createClientHandler(strategy)
             const unsubscribe = client.on('*', handler)
             unsubscribeRef.current = unsubscribe
 
-            // 连接
-            client.connect().catch((err) => {
-                console.error('[useSSE] Failed to connect:', err)
+            client.connect().catch((error) => {
+                const normalizedError = toError(error)
+                setError(normalizedError)
+                reportClientError({
+                    source: 'use-sse',
+                    message: normalizedError.message,
+                    sessionId: client.sessionId,
+                    status: client.status,
+                    eventType: 'status-change',
+                    extra: {
+                        action: 'send',
+                    },
+                })
             })
         },
-        [
-            url,
-            maxRetries,
-            retryDelay,
-            timeout,
-            strategy,
-            disconnect,
-            onStatusChange,
-        ] // 只在连接参数改变时重新创建客户端
+        [createClientHandler, maxRetries, retryDelay, strategy, timeout, url]
     )
 
-    // 清理方法
     const destroy = useCallback(() => {
         if (clientRef.current) {
             clientRef.current.destroy()
@@ -201,6 +236,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
         status,
         sessionId,
         error,
+        connectionState,
         isConnected: status === 'connected',
         connect,
         disconnect,
@@ -209,45 +245,14 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
     }
 }
 
-/**
- * useAgentChat Hook
- * 专门用于 Agent 聊天的 Hook
- */
 export interface UseAgentChatOptions {
-    /**
-     * 聊天开始回调
-     */
     onChatStart?: () => void
-
-    /**
-     * 思考日志回调
-     */
     onThoughtLog?: (data: ThoughtLogEventData) => void
-
-    /**
-     * 增强 Prompt 回调
-     */
     onEnhancedPrompt?: (data: EnhancedPromptEventData) => void
-
-    /**
-     * GenUI 组件回调
-     */
     onGenUIComponent?: (data: GenUIComponentEventData) => void
-
-    /**
-     * 错误回调
-     */
     onError?: (data: ErrorEventData) => void
-
-    /**
-     * 聊天结束回调
-     */
     onChatEnd?: () => void
-
-    /**
-     * 连接状态变化回调
-     */
-    onStatusChange?: (status: any) => void
+    onStatusChange?: (payload: SSEStatusChangeData) => void
 }
 
 export interface SendMessageOptions {
@@ -256,7 +261,6 @@ export interface SendMessageOptions {
 }
 
 interface UseAgentChatReturn extends UseSSEReturn {
-    // 发送消息
     sendMessage: (text: string, options?: SendMessageOptions) => void
 }
 
@@ -273,7 +277,6 @@ export function useAgentChat(
         onStatusChange,
     } = options
 
-    // 使用 ref 存储最新的回调函数，避免闭包陷阱 ！！！
     const callbacksRef = useRef({
         onChatStart,
         onThoughtLog,
@@ -284,7 +287,6 @@ export function useAgentChat(
         onStatusChange,
     })
 
-    // 更新 ref 当回调函数变化时
     useEffect(() => {
         callbacksRef.current = {
             onChatStart,
@@ -305,56 +307,46 @@ export function useAgentChat(
         onStatusChange,
     ])
 
-    const sse = useSSE({
-        //url: '/api/agent/chat',
-        url: 'http://localhost:3000/api/agent/chat', // ⭐ 直接连接后端
-        autoConnect: false, // 不自动连接，手动发送消息时连接
-        strategy: {
+    const strategy = useMemo<EventHandlerStrategy>(
+        () => ({
             onThoughtLog: (event) => {
-                const callback = callbacksRef.current.onThoughtLog
-                if (callback && event.data) {
-                    callback(event.data as ThoughtLogEventData)
-                }
+                callbacksRef.current.onThoughtLog?.(
+                    event.data as ThoughtLogEventData
+                )
             },
             onEnhancedPrompt: (event) => {
-                const callback = callbacksRef.current.onEnhancedPrompt
-                if (callback && event.data) {
-                    callback(event.data as EnhancedPromptEventData)
-                }
+                callbacksRef.current.onEnhancedPrompt?.(
+                    event.data as EnhancedPromptEventData
+                )
             },
             onGenUIComponent: (event) => {
-                const callback = callbacksRef.current.onGenUIComponent
-                if (callback && event.data) {
-                    callback(event.data as GenUIComponentEventData)
-                }
+                callbacksRef.current.onGenUIComponent?.(
+                    event.data as GenUIComponentEventData
+                )
             },
             onError: (event) => {
-                const callback = callbacksRef.current.onError
-                if (callback && event.data) {
-                    callback(event.data as ErrorEventData)
-                }
+                callbacksRef.current.onError?.(event.data as ErrorEventData)
             },
             onStreamEnd: () => {
-                const callback = callbacksRef.current.onChatEnd
-                if (callback) {
-                    callback()
-                }
+                callbacksRef.current.onChatEnd?.()
             },
-            onStatusChange: (status) => {
-                const callback = callbacksRef.current.onStatusChange
-                if (callback) {
-                    callback(status)
-                }
-            },
+        }),
+        []
+    )
+
+    const sse = useSSE({
+        url: 'http://localhost:3000/api/agent/chat',
+        autoConnect: false,
+        strategy,
+        onStatusChange: (payload) => {
+            callbacksRef.current.onStatusChange?.(payload)
         },
     })
 
-    // 发送消息方法
     const sendMessage = useCallback(
         (text: string, options?: SendMessageOptions) => {
             const body = {
                 text,
-                //既保证option存在，也保证maskData和previousPrompts存在
                 ...(options?.maskData && { maskData: options.maskData }),
                 ...(options?.previousPrompts &&
                     options.previousPrompts.length > 0 && {
@@ -362,17 +354,14 @@ export function useAgentChat(
                     }),
             }
 
-            if (callbacksRef.current.onChatStart) {
-                callbacksRef.current.onChatStart()
-            }
-
+            callbacksRef.current.onChatStart?.()
             sse.send(body)
         },
-        [sse] // 依赖 sse 实例，确保在连接状态变化时重新创建
+        [sse]
     )
 
     return {
         ...sse,
-        sendMessage, //接口仅使用了sendMessage方法
+        sendMessage,
     }
 }

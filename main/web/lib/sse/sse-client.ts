@@ -1,35 +1,35 @@
 /**
- * SSE 客户端
- * 支持 POST 请求的 Server-Sent Events 客户端实现
+ * SSE client with POST support, structured status changes and local observability.
  */
 
 import {
-    SSEOptions,
-    SSEEventHandler,
-    SSEEvent,
     SSEConnectionStatus,
+    SSEEvent,
+    SSEEventHandler,
+    SSEOptions,
+    SSEStatusChangeData,
+    SSEStatusChangeReason,
 } from '@/lib/types/sse'
+import {
+    recordClientTelemetry,
+    reportClientError,
+} from '@/lib/monitoring/client-observability'
 
 export class SSEClient {
-    // 连接控制
-    private controller: AbortController | null = null // 请求取消控制器
-    private reader: ReadableStreamDefaultReader<Uint8Array> | null = null // 数据流读取器
-
-    // 重试机制
-    private retryCount = 0 // 当前重试次数
-    private heartbeatTimer: NodeJS.Timeout | null = null // 心跳定时器
-    private isManualClose = false // 是否手动关闭
-
-    // 事件处理器  由于switch判断类型并执行，因此只需要装进<'*',Set<SSEEventHandler>>中即可
-    private eventHandlers: Map<string, Set<SSEEventHandler>> = new Map() // 事件处理器映射
-
-    // 配置
+    private controller: AbortController | null = null
+    private reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+    private retryCount = 0
+    private heartbeatTimer: NodeJS.Timeout | null = null
+    private isManualClose = false
+    private eventHandlers: Map<string, Set<SSEEventHandler>> = new Map()
     private options: Required<SSEOptions>
+    private currentEvent: string | undefined
+    private currentData: string | undefined
+    private hasReceivedStreamEnd = false
 
-    // 状态
-    public status: SSEConnectionStatus = 'idle' // 当前连接状态
-    public sessionId: string | null = null // 当前会话 ID
-    public error: Error | null = null // 连接错误信息
+    public status: SSEConnectionStatus = 'idle'
+    public sessionId: string | null = null
+    public error: Error | null = null
 
     constructor(options: SSEOptions) {
         this.options = {
@@ -42,9 +42,6 @@ export class SSEClient {
         }
     }
 
-    /**
-     * 连接到 SSE 服务器
-     */
     async connect(): Promise<void> {
         if (this.status === 'connecting' || this.status === 'connected') {
             console.warn('[SSE] Already connected or connecting')
@@ -52,19 +49,17 @@ export class SSEClient {
         }
 
         this.isManualClose = false
+        this.hasReceivedStreamEnd = false
+        this.error = null
         this.status = 'connecting'
-        this.notifyStatusChange()
+        this.notifyStatusChange('connect-start')
 
         try {
-            // 创建新的 AbortController
             this.controller = new AbortController()
-
-            // 设置超时
             const timeoutId = setTimeout(() => {
                 this.controller?.abort()
             }, this.options.timeout)
 
-            // 发送 POST 请求
             const response = await fetch(this.options.url, {
                 method: 'POST',
                 headers: {
@@ -78,57 +73,72 @@ export class SSEClient {
             clearTimeout(timeoutId)
 
             if (!response.ok) {
-                throw new Error(
-                    `HTTP ${response.status}: ${response.statusText}`
-                )
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`)
             }
 
             if (!response.body) {
                 throw new Error('Response body is null')
             }
 
-            // 获取读取器
             this.reader = response.body.getReader()
-
-            // 更新状态
             this.status = 'connected'
-            this.notifyStatusChange()
-
-            // 开始读取事件流
+            this.error = null
+            this.retryCount = 0
+            this.notifyStatusChange('connect-success')
             await this.readStream()
-        } catch (err: any) {
-            // 如果是手动关闭，不重连
+        } catch (error) {
             if (this.isManualClose) {
                 console.log('[SSE] Connection closed manually')
                 return
             }
 
-            // 连接失败
-            this.error = err
+            const reason = this.resolveConnectionErrorReason(error)
+            const normalizedError = this.toError(error)
+            this.error = normalizedError
             this.status = 'error'
-            this.notifyStatusChange()
 
-            // 尝试重连
+            reportClientError({
+                source: 'sse-connect',
+                message: normalizedError.message,
+                sessionId: this.sessionId,
+                status: this.status,
+                eventType: 'status-change',
+                reason,
+                retryCount: this.retryCount,
+                extra: {
+                    url: this.options.url,
+                },
+            })
+
+            this.notifyStatusChange(reason)
+
             if (this.retryCount < this.options.maxRetries) {
-                this.retryCount++
+                this.retryCount += 1
                 const delay =
                     this.options.retryDelay * Math.pow(2, this.retryCount - 1)
-                console.log(
-                    `[SSE] Connection failed, retrying in ${delay}ms (attempt ${this.retryCount}/${this.options.maxRetries})`
-                )
+
+                recordClientTelemetry({
+                    name: 'sse_reconnect_scheduled',
+                    sessionId: this.sessionId,
+                    status: this.status,
+                    reason,
+                    retryCount: this.retryCount,
+                    extra: {
+                        delay,
+                        url: this.options.url,
+                    },
+                })
 
                 setTimeout(() => {
                     this.connect()
                 }, delay)
             } else {
+                this.notifyStatusChange('max-retries-reached')
                 console.error('[SSE] Max retries reached, giving up')
             }
         }
     }
 
-    /**
-     * 读取事件流
-     */
     private async readStream(): Promise<void> {
         if (!this.reader) {
             throw new Error('Reader is not initialized')
@@ -136,278 +146,243 @@ export class SSEClient {
 
         const decoder = new TextDecoder()
         let buffer = ''
-        let count = 0
+
         try {
             while (true) {
-                count++
                 const { done, value } = await this.reader.read()
-                //服务器断连时，done为true
-                if (done) {
-                    console.log('[SSE] Stream ended')
 
-                    // 流结束时，如果还有未分发的事件，分发它
-                    // 后端可能不在最后一个事件后发送空行，但事件数据本身是完整的
+                if (done) {
                     if (this.currentEvent && this.currentData) {
-                        console.log(
-                            '[SSE] Dispatching last event before stream end:',
-                            this.currentEvent
-                        )
                         this.dispatchEvent(this.currentEvent, this.currentData)
                     }
 
-                    // 清空当前状态
                     this.currentEvent = undefined
                     this.currentData = undefined
-
                     break
                 }
-                console.log('count =', count)
-                console.log('[SSE] Received:', buffer)
-                // 解码数据
+
                 buffer += decoder.decode(value, { stream: true })
-
-                console.log('[SSE] Received:', buffer)
-
-                // 按行分割
-                const lines = buffer.split(/\r\n|\n|\r/) //注意，若最后一个为\r\n|\n|\r，会多出一个空字符串
-                buffer = lines.pop() || '' //拿出lines的最后一个句子（最后一个句子可能不完整）
+                const lines = buffer.split(/\r\n|\n|\r/)
+                buffer = lines.pop() || ''
 
                 for (const line of lines) {
-                    if (!line.trim()) continue
-
-                    // 解析 SSE 事件
                     this.parseSSELine(line)
                 }
             }
-            count = 0
-            // 流正常结束
-            if (!this.isManualClose) {
+
+            if (
+                !this.isManualClose &&
+                this.status !== 'error' &&
+                !this.hasReceivedStreamEnd
+            ) {
+                this.error = null
                 this.status = 'disconnected'
-                this.notifyStatusChange()
+                this.notifyStatusChange('stream-end')
             }
-        } catch (err: any) {
-            // 如果是手动关闭，不处理错误
+        } catch (error) {
             if (this.isManualClose) {
                 console.log('[SSE] Connection closed manually')
                 return
             }
 
-            console.error('[SSE] Error reading stream:', err)
-            throw err
+            const normalizedError = this.toError(error)
+            reportClientError({
+                source: 'sse-read',
+                message: normalizedError.message,
+                sessionId: this.sessionId,
+                status: this.status,
+                eventType: this.currentEvent,
+                reason: 'stream-error',
+                retryCount: this.retryCount,
+            })
+            throw normalizedError
         }
     }
 
-    /**
-     * 解析 SSE 事件行
-     */
     private parseSSELine(line: string): void {
-        // 格式: event: xxx
         if (line.startsWith('event:')) {
-            // 如果遇到新的事件类型，且之前有未分发的事件数据，先分发它
             if (this.currentEvent && this.currentData) {
                 this.dispatchEvent(this.currentEvent, this.currentData)
             }
-            // 清空当前事件和数据，开始新事件
             this.currentEvent = line.substring(6).trim()
             this.currentData = ''
             return
         }
 
-        // 格式: data: xxx
         if (line.startsWith('data:')) {
             const data = line.substring(5).trim()
-
-            // 累积数据（支持多行 data）
-            if (!this.currentData) {
-                this.currentData = data
-            } else {
-                this.currentData += '\n' + data
-            }
+            this.currentData = this.currentData ? `${this.currentData}
+${data}` : data
             return
         }
 
-        // 空行表示事件结束
-        if (line.trim() === '') {
-            if (this.currentEvent && this.currentData) {
-                // 分发事件
-                this.dispatchEvent(this.currentEvent, this.currentData)
-                // 清空当前事件和数据
-                this.currentEvent = undefined
-                this.currentData = undefined
-            }
+        if (line.trim() === '' && this.currentEvent && this.currentData) {
+            this.dispatchEvent(this.currentEvent, this.currentData)
+            this.currentEvent = undefined
+            this.currentData = undefined
         }
     }
 
-    private currentEvent: string | undefined
-    private currentData: string | undefined
-
-    /**
-     * 分发事件
-     */
     private dispatchEvent(eventType: string, data: string): void {
         try {
-            // 后端发送的数据已经是完整的事件对象 {type, timestamp, data}
             const parsedData = JSON.parse(data)
-
-            // 检查是否是嵌套的事件对象格式（包含 type, timestamp, data）
             const isNestedFormat =
                 parsedData.type && parsedData.data !== undefined
 
-            let event: SSEEvent
-            console.log('[SSE] Dispatching event:', eventType, parsedData)
-            if (isNestedFormat) {
-                // 后端发送的是完整事件对象，直接使用内层数据
-                event = {
-                    type: eventType as any,
-                    timestamp: parsedData.timestamp || Date.now(),
-                    data: parsedData.data, // 提取内层的真实业务数据
-                }
-            } else {
-                // 特殊事件（如 connection）直接使用 parsedData  !!!
-                event = {
-                    type: eventType as any,
-                    timestamp: Date.now(),
-                    data: parsedData,
-                }
-            }
+            const event: SSEEvent = isNestedFormat
+                ? {
+                      type: eventType as SSEEvent['type'],
+                      timestamp: parsedData.timestamp || Date.now(),
+                      data: parsedData.data,
+                  }
+                : {
+                      type: eventType as SSEEvent['type'],
+                      timestamp: Date.now(),
+                      data: parsedData,
+                  }
 
-            // 触发事件处理器
             this.emit(eventType, event)
 
-            // 处理特殊事件  !!!
             if (eventType === 'connection') {
                 this.sessionId = event.data.sessionId
-                console.log('[SSE] Connected with session:', this.sessionId)
             }
 
-            // stream_end 事件发出后再更新状态  !!!
             if (eventType === 'stream_end') {
-                // 使用 setTimeout 确保事件处理器已经执行
+                this.hasReceivedStreamEnd = true
                 setTimeout(() => {
+                    this.error = null
                     this.status = 'disconnected'
-                    this.notifyStatusChange()
+                    this.notifyStatusChange('stream-end')
                 }, 0)
             }
-        } catch (err) {
-            console.error('[SSE] Failed to parse event data:', err)
+        } catch (error) {
+            const normalizedError = this.toError(error)
+            reportClientError({
+                source: 'sse-parse',
+                message: normalizedError.message,
+                sessionId: this.sessionId,
+                status: this.status,
+                eventType,
+                reason: 'stream-error',
+                retryCount: this.retryCount,
+                extra: {
+                    rawData: data,
+                },
+            })
         }
     }
 
-    /**
-     * 触发事件处理器 !!! 通配符处理器？
-     */
     private emit(eventType: string, event: SSEEvent): void {
-        // 执行特定事件类型的处理器  !!!不执行
         const handlers = this.eventHandlers.get(eventType)
-        //console.log('[SSE] Executing handlers for event:', eventType, handlers)
         if (handlers) {
             handlers.forEach((handler) => {
                 try {
                     handler(event)
-                } catch (err) {
-                    console.error(
-                        `[SSE] Error in event handler for ${eventType}:`,
-                        err
-                    )
+                } catch (error) {
+                    const normalizedError = this.toError(error)
+                    reportClientError({
+                        source: 'sse-handler',
+                        message: normalizedError.message,
+                        sessionId: this.sessionId,
+                        status: this.status,
+                        eventType,
+                        retryCount: this.retryCount,
+                        extra: {
+                            handlerScope: 'event',
+                        },
+                    })
                 }
             })
         }
 
-        // 执行通配符处理器 '*'（监听所有事件的处理器）
         const wildcardHandlers = this.eventHandlers.get('*')
-
         if (wildcardHandlers) {
-            wildcardHandlers.forEach((handler, index) => {
+            wildcardHandlers.forEach((handler) => {
                 try {
                     handler(event)
-                } catch (err) {
-                    console.error(
-                        `[SSE] Error in wildcard handler for ${eventType}:`,
-                        err
-                    )
+                } catch (error) {
+                    const normalizedError = this.toError(error)
+                    reportClientError({
+                        source: 'sse-handler',
+                        message: normalizedError.message,
+                        sessionId: this.sessionId,
+                        status: this.status,
+                        eventType,
+                        retryCount: this.retryCount,
+                        extra: {
+                            handlerScope: 'wildcard',
+                        },
+                    })
                 }
             })
         }
     }
 
-    /**
-     * 注册事件处理器
-     */
     on(eventType: string, handler: SSEEventHandler): () => void {
         if (!this.eventHandlers.has(eventType)) {
             this.eventHandlers.set(eventType, new Set())
         }
-        //非空断言符
-        this.eventHandlers.get(eventType)!.add(handler)
 
-        // 返回取消订阅函数
+        this.eventHandlers.get(eventType)!.add(handler)
         return () => {
             this.off(eventType, handler)
         }
     }
 
-    /**
-     * 取消注册事件处理器
-     */
     off(eventType: string, handler: SSEEventHandler): void {
-        const handlers = this.eventHandlers.get(eventType)
-        if (handlers) {
-            handlers.delete(handler)
-        }
+        this.eventHandlers.get(eventType)?.delete(handler)
     }
 
-    /**
-     * 通知状态变化
-     */
-    private notifyStatusChange(): void {
+    private notifyStatusChange(reason: SSEStatusChangeReason): void {
+        const payload: SSEStatusChangeData = {
+            status: this.status,
+            sessionId: this.sessionId,
+            errorMessage: this.error?.message,
+            reason,
+            retryCount: this.retryCount,
+        }
+
+        recordClientTelemetry({
+            name: 'sse_status_change',
+            sessionId: payload.sessionId,
+            status: payload.status,
+            reason: payload.reason,
+            retryCount: payload.retryCount,
+        })
+
         this.emit('status-change', {
             type: 'status-change',
             timestamp: Date.now(),
-            data: {
-                status: this.status,
-                sessionId: this.sessionId,
-                error: this.error,
-            },
+            data: payload,
         })
     }
 
-    /**
-     * 断开连接
-     */
     disconnect(): void {
         this.isManualClose = true
         this.stopHeartbeat()
 
-        // 取消请求
         if (this.controller) {
             this.controller.abort()
             this.controller = null
         }
 
-        // 取消读取器
         if (this.reader) {
             this.reader.cancel()
             this.reader = null
         }
 
-        // 更新状态
         this.status = 'idle'
-        this.sessionId = null
         this.error = null
         this.retryCount = 0
-        this.notifyStatusChange()
+        this.hasReceivedStreamEnd = false
+        this.notifyStatusChange('manual-close')
+        this.sessionId = null
     }
 
-    /**
-     * 启动心跳
-     */
     private startHeartbeat(): void {
         this.stopHeartbeat()
-
         this.heartbeatTimer = setInterval(() => {
-            // 检查连接状态
             if (this.status === 'connected') {
-                // 发送心跳事件
                 this.emit('heartbeat', {
                     type: 'heartbeat',
                     timestamp: Date.now(),
@@ -419,9 +394,6 @@ export class SSEClient {
         }, this.options.heartbeatInterval)
     }
 
-    /**
-     * 停止心跳  !!!为什么clearInterval后还要将定时器设为null？
-     */
     private stopHeartbeat(): void {
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer)
@@ -429,18 +401,26 @@ export class SSEClient {
         }
     }
 
-    /**
-     * 清理资源
-     */
+    private resolveConnectionErrorReason(error: unknown): SSEStatusChangeReason {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+            return 'timeout'
+        }
+        return 'network-error'
+    }
+
+    private toError(error: unknown): Error {
+        if (error instanceof Error) {
+            return error
+        }
+        return new Error(typeof error === 'string' ? error : 'Unknown SSE error')
+    }
+
     destroy(): void {
         this.disconnect()
         this.eventHandlers.clear()
     }
 }
 
-/**
- * 创建 SSE 客户端实例
- */
 export function createSSEClient(options: SSEOptions): SSEClient {
     return new SSEClient(options)
 }

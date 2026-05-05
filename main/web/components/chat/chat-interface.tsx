@@ -11,10 +11,12 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Send, Loader2, Sparkles, ArrowDown, X } from 'lucide-react'
 import { useAgentChat } from '@/hooks/use-sse'
+import { reportClientError } from '@/lib/monitoring/client-observability'
 import {
     ThoughtLogEventData, //AI 思考日志事件数据
     EnhancedPromptEventData, //增强提示事件数据
     GenUIComponentEventData, //GenUI 组件事件数据
+    SSEStatusChangeData,
 } from '@/lib/types/sse'
 import {
     GenUIComponent,
@@ -41,6 +43,45 @@ interface ChatTurn {
     content: string
     timestamp: number
     genUIComponents?: GenUIComponent[]
+}
+
+function getConnectionBannerState(connectionState: SSEStatusChangeData | null) {
+    if (!connectionState) {
+        return null
+    }
+
+    if (connectionState.status === 'connecting') {
+        return {
+            tone: 'info' as const,
+            message: '正在连接...',
+        }
+    }
+
+    if (connectionState.status === 'error') {
+        if (connectionState.reason === 'max-retries-reached') {
+            return {
+                tone: 'error' as const,
+                message: '连接失败，请重试',
+            }
+        }
+
+        return {
+            tone: 'warning' as const,
+            message: `连接中断，正在重试（第 ${Math.max(connectionState.retryCount, 1)} 次）`,
+        }
+    }
+
+    if (
+        connectionState.status === 'disconnected' &&
+        connectionState.reason !== 'stream-end'
+    ) {
+        return {
+            tone: 'warning' as const,
+            message: '连接已断开',
+        }
+    }
+
+    return null
 }
 
 /**
@@ -252,6 +293,8 @@ export function ChatInterface({
     const [pendingMaskData, setPendingMaskData] = useState<MaskData | null>(
         null
     ) // 等待用户补充编辑说明的蒙版数据
+    const [connectionState, setConnectionState] =
+        useState<SSEStatusChangeData | null>(null)
 
     const sessionIdWhenSendRef = useRef<string | null>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -422,6 +465,7 @@ export function ChatInterface({
         // 处理聊天开始事件
         onChatStart: () => {
             console.log('[onChatStart] RESET]')
+            setConnectionState(null)
             setIsProcessing(true)
             streamingComponentsRef.current = []
             setStreamingComponents([])
@@ -506,19 +550,32 @@ export function ChatInterface({
                         loadSessions()
                     })
                     .catch((error) => {
-                        console.error(
-                            '[ChatInterface] Failed to save assistant message:',
-                            error
-                        )
+                        reportClientError({
+                            source: 'chat-ui',
+                            message:
+                                error instanceof Error
+                                    ? error.message
+                                    : 'Failed to save assistant message',
+                            sessionId: sessionIdToSave,
+                            extra: {
+                                action: 'save-assistant-message',
+                            },
+                        })
                     })
             }
             // 调用外部 onChatEnd 回调（如果有）
             onChatEnd?.()
         },
         // 处理状态变更事件（可选）
-        onStatusChange: (status) => {
-            if (status === 'idle' && !isProcessing) {
-                // Reset logic if needed
+        onStatusChange: (payload) => {
+            setConnectionState(payload)
+
+            if (
+                payload.status === 'error' &&
+                payload.reason === 'max-retries-reached'
+            ) {
+                setIsProcessing(false)
+                sessionIdWhenSendRef.current = null
             }
         },
     })
@@ -651,10 +708,17 @@ export function ChatInterface({
                 console.log('[ChatInterface] User message saved')
             })
             .catch((error) => {
-                console.error(
-                    '[ChatInterface] Failed to save user message:',
-                    error
-                )
+                reportClientError({
+                    source: 'chat-ui',
+                    message:
+                        error instanceof Error
+                            ? error.message
+                            : 'Failed to save user message',
+                    sessionId: currentSessionId,
+                    extra: {
+                        action: 'save-user-message',
+                    },
+                })
             })
         // 局部重绘需要同时提交蒙版和用户明确的编辑说明。
         if (pendingMaskData) {
@@ -676,6 +740,8 @@ export function ChatInterface({
             handleSend()
         }
     }
+
+    const connectionBanner = getConnectionBannerState(connectionState)
 
     return (
         <div className="flex flex-col h-full bg-background/50 relative">
@@ -765,6 +831,21 @@ export function ChatInterface({
             {/* 底部输入框 - 固定定位 flex-shrink-0 禁止收缩,保持固定高度*/}
             <div className="flex-shrink-0 bg-background/80 backdrop-blur-md border-t p-4 pb-6 z-20">
                 <div className="mx-auto relative">
+                    {connectionBanner && (
+                        <div
+                            className={cn(
+                                'mb-3 rounded-lg border px-3 py-2 text-sm',
+                                connectionBanner.tone === 'info' &&
+                                    'border-blue-200 bg-blue-50 text-blue-900',
+                                connectionBanner.tone === 'warning' &&
+                                    'border-amber-200 bg-amber-50 text-amber-900',
+                                connectionBanner.tone === 'error' &&
+                                    'border-red-200 bg-red-50 text-red-900'
+                            )}
+                        >
+                            {connectionBanner.message}
+                        </div>
+                    )}
                     {pendingMaskData && (
                         <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
                             <span>
@@ -782,37 +863,39 @@ export function ChatInterface({
                             </Button>
                         </div>
                     )}
-                    <Textarea
-                        ref={inputRef}
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder={
-                            pendingMaskData
-                                ? '描述局部重绘要求，如：把这里改成机械手臂'
-                                : placeholder
-                        }
-                        disabled={isProcessing}
-                        className="min-h-[52px] max-h-[200px] resize-none pr-14 py-3.5 rounded-xl shadow-sm border-muted-foreground/20 focus-visible:ring-blue-500/20 [&::placeholder]:whitespace-nowrap [&::placeholder]:overflow-hidden [&::placeholder]:text-ellipsis"
-                        rows={1}
-                    />
-                    <Button
-                        onClick={handleSend}
-                        disabled={!input.trim() || isProcessing}
-                        size="icon"
-                        className={cn(
-                            'absolute right-1.5 top-1.5 h-10 w-10 rounded-lg transition-all',
-                            input.trim()
-                                ? 'bg-blue-600 hover:bg-blue-700'
-                                : 'bg-muted text-muted-foreground hover:bg-muted'
-                        )}
-                    >
-                        {isProcessing ? (
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                        ) : (
-                            <Send className="h-5 w-5" />
-                        )}
-                    </Button>
+                    <div className="relative">
+                        <Textarea
+                            ref={inputRef}
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            placeholder={
+                                pendingMaskData
+                                    ? '描述局部重绘要求，如：把这里改成机械手臂'
+                                    : placeholder
+                            }
+                            disabled={isProcessing}
+                            className="min-h-[52px] max-h-[200px] resize-none pr-14 py-3.5 rounded-xl shadow-sm border-muted-foreground/20 focus-visible:ring-blue-500/20 [&::placeholder]:whitespace-nowrap [&::placeholder]:overflow-hidden [&::placeholder]:text-ellipsis"
+                            rows={1}
+                        />
+                        <Button
+                            onClick={handleSend}
+                            disabled={!input.trim() || isProcessing}
+                            size="icon"
+                            className={cn(
+                                'absolute right-1.5 top-1.5 h-10 w-10 rounded-lg transition-all',
+                                input.trim()
+                                    ? 'bg-blue-600 hover:bg-blue-700'
+                                    : 'bg-muted text-muted-foreground hover:bg-muted'
+                            )}
+                        >
+                            {isProcessing ? (
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                            ) : (
+                                <Send className="h-5 w-5" />
+                            )}
+                        </Button>
+                    </div>
                     <div className="text-[10px] text-muted-foreground mt-2 text-center opacity-70">
                         AiVista Agent • 由大型语言模型驱动
                     </div>

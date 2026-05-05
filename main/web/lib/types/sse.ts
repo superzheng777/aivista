@@ -189,6 +189,24 @@ export type SSEConnectionStatus =
     | 'disconnected' // 已断开
     | 'error' // 错误
 
+export type SSEStatusChangeReason =
+    | 'connect-start'
+    | 'connect-success'
+    | 'timeout'
+    | 'network-error'
+    | 'stream-error'
+    | 'manual-close'
+    | 'stream-end'
+    | 'max-retries-reached'
+
+export interface SSEStatusChangeData {
+    status: SSEConnectionStatus
+    sessionId: string | null
+    errorMessage?: string
+    reason: SSEStatusChangeReason
+    retryCount: number
+}
+
 /**
  * SSE 配置选项
  */
