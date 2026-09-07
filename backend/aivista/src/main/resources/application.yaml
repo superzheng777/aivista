@@ -98,12 +98,19 @@ app:
       # 当前所有开发配置统一维护在本文件；未配置 RabbitMQ 时保持 false，避免启动分发器。
       enabled: true
       exchange: aivista.generation.commands
+      dead-letter-exchange: aivista.generation.dead-letter
       generation-name: generation.task.execute
       generation-routing-key: generation.task.execute
+      # 以下两个并发度由 backend-ts 从本配置读取；Java 不消费生成和转存命令。
       generation-consumer-concurrency: 25
       transfer-name: generation.image.transfer
       transfer-routing-key: generation.image.transfer
       transfer-consumer-concurrency: 15
+      worker-result-name: generation.worker.result
+      worker-result-routing-key: generation.worker.result
+      worker-result-dead-letter-name: generation.worker.result.dead-letter
+      worker-result-dead-letter-routing-key: generation.worker.result.dead-letter
+      worker-result-consumer-concurrency: 5
       dispatcher-fixed-delay: 1s
       dispatcher-batch-size: 20
       processing-lease: 30s

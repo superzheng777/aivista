@@ -1,0 +1,33 @@
+{
+  "name": "@aivista/backend-ts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "worker": "node dist/worker.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --pool=threads"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.6",
+    "@nestjs/config": "^4.0.2",
+    "@nestjs/core": "^11.1.6",
+    "ali-oss": "^6.23.0",
+    "amqplib": "2.0.1",
+    "kysely": "^0.28.8",
+    "mysql2": "^3.15.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/ali-oss": "^6.23.3",
+    "@types/amqplib": "^0.10.8",
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8",
+    "yaml": "^2.8.1"
+  },
+  "packageManager": "pnpm@10.15.0"
+}

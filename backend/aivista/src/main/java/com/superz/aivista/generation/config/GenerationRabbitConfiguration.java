@@ -24,6 +24,11 @@ public class GenerationRabbitConfiguration {
     }
 
     @Bean
+    DirectExchange generationDeadLetterExchange(GenerationQueueProperties properties) {
+        return ExchangeBuilder.directExchange(properties.deadLetterExchange()).durable(true).build();
+    }
+
+    @Bean
     Queue generationTaskExecuteQueue(GenerationQueueProperties properties) {
         return QueueBuilder.durable(properties.generationName())
                 .withArgument("x-queue-type", "quorum")
@@ -32,7 +37,8 @@ public class GenerationRabbitConfiguration {
 
     @Bean
     Binding generationTaskExecuteBinding(@Qualifier("generationTaskExecuteQueue") Queue generationTaskExecuteQueue,
-            DirectExchange generationCommandExchange, GenerationQueueProperties properties) {
+            @Qualifier("generationCommandExchange") DirectExchange generationCommandExchange,
+            GenerationQueueProperties properties) {
         return BindingBuilder.bind(generationTaskExecuteQueue)
                 .to(generationCommandExchange)
                 .with(properties.generationRoutingKey());
@@ -48,32 +54,52 @@ public class GenerationRabbitConfiguration {
     @Bean
     Binding generationImageTransferBinding(
             @Qualifier("generationImageTransferQueue") Queue generationImageTransferQueue,
-            DirectExchange generationCommandExchange, GenerationQueueProperties properties) {
+            @Qualifier("generationCommandExchange") DirectExchange generationCommandExchange,
+            GenerationQueueProperties properties) {
         return BindingBuilder.bind(generationImageTransferQueue)
                 .to(generationCommandExchange)
                 .with(properties.transferRoutingKey());
     }
 
-    /** 生成消费者在持久化百炼结果并创建转存命令后确认；单个消费者一次只领取一条消息。 */
     @Bean
-    SimpleRabbitListenerContainerFactory generationTaskListenerContainerFactory(
-            ConnectionFactory connectionFactory, GenerationQueueProperties properties) {
-        SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
-        factory.setConnectionFactory(connectionFactory);
-        factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
-        factory.setConcurrentConsumers(properties.generationConsumerConcurrency());
-        factory.setPrefetchCount(1);
-        return factory;
+    Queue generationWorkerResultQueue(GenerationQueueProperties properties) {
+        return QueueBuilder.durable(properties.workerResultName())
+                .withArgument("x-queue-type", "quorum")
+                .deadLetterExchange(properties.deadLetterExchange())
+                .deadLetterRoutingKey(properties.workerResultDeadLetterRoutingKey())
+                .build();
     }
 
-    /** 转存工作器使用独立线程池，避免 OSS 网络操作占用百炼生成消费者。 */
     @Bean
-    SimpleRabbitListenerContainerFactory generationImageTransferListenerContainerFactory(
+    Queue generationWorkerResultDeadLetterQueue(GenerationQueueProperties properties) {
+        return QueueBuilder.durable(properties.workerResultDeadLetterName())
+                .withArgument("x-queue-type", "quorum")
+                .build();
+    }
+
+    @Bean
+    Binding generationWorkerResultBinding(
+            @Qualifier("generationWorkerResultQueue") Queue queue,
+            @Qualifier("generationCommandExchange") DirectExchange exchange,
+            GenerationQueueProperties properties) {
+        return BindingBuilder.bind(queue).to(exchange).with(properties.workerResultRoutingKey());
+    }
+
+    @Bean
+    Binding generationWorkerResultDeadLetterBinding(
+            @Qualifier("generationWorkerResultDeadLetterQueue") Queue queue,
+            @Qualifier("generationDeadLetterExchange") DirectExchange exchange,
+            GenerationQueueProperties properties) {
+        return BindingBuilder.bind(queue).to(exchange).with(properties.workerResultDeadLetterRoutingKey());
+    }
+
+    @Bean
+    SimpleRabbitListenerContainerFactory generationWorkerResultListenerContainerFactory(
             ConnectionFactory connectionFactory, GenerationQueueProperties properties) {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         factory.setConnectionFactory(connectionFactory);
         factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
-        factory.setConcurrentConsumers(properties.transferConsumerConcurrency());
+        factory.setConcurrentConsumers(properties.workerResultConsumerConcurrency());
         factory.setPrefetchCount(1);
         return factory;
     }

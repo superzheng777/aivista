@@ -6,23 +6,10 @@ import com.aliyun.oss.OSSClientBuilder;
 import java.time.Duration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.web.client.RestClient;
 
-/** 创建图像生成执行阶段共用的百炼 HTTP 客户端和 OSS 客户端。 */
+/** 创建 Java Core 的资产上传、访问和清理所需的 OSS 客户端。 */
 @Configuration
 public class GenerationExecutionConfiguration {
-
-    @Bean
-    RestClient generationBailianRestClient(GenerationBailianProperties properties) {
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(properties.connectTimeout());
-        requestFactory.setReadTimeout(properties.readTimeout());
-        return RestClient.builder()
-                .baseUrl(properties.endpoint())
-                .requestFactory(requestFactory)
-                .build();
-    }
 
     @Bean(destroyMethod = "shutdown")
     OSS generationOssClient(GenerationOssProperties properties) {

@@ -104,9 +104,11 @@ class GenerationOutboxDispatcherTests {
     }
 
     static GenerationQueueProperties properties() {
-        return new GenerationQueueProperties(true, "aivista.generation.commands",
-                "generation.task.execute", "generation.task.execute", 25,
-                "generation.image.transfer", "generation.image.transfer", 15,
+        return new GenerationQueueProperties(true, "aivista.generation.commands", "aivista.generation.dead-letter",
+                "generation.task.execute", "generation.task.execute",
+                "generation.image.transfer", "generation.image.transfer",
+                "generation.worker.result", "generation.worker.result",
+                "generation.worker.result.dead-letter", "generation.worker.result.dead-letter", 5,
                 Duration.ofSeconds(1), 20, Duration.ofSeconds(30), 5, Duration.ofSeconds(5),
                 Duration.ofMinutes(3), Duration.ofSeconds(30),
                 Duration.ofMinutes(2), Duration.ofSeconds(30));

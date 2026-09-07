@@ -418,7 +418,7 @@ Tool 输入 Schema 应由一个运行时 Schema 单一生成 TypeScript 类型�
 8. 模型应用 Skill 的设计方法和 Prompt 规范，收敛唯一最终 Prompt，并产生包含 `prompt`、`imageCount` 等参数的 `text2image` 或 `image2image` Tool Call。
 9. Runtime 校验后通过 Java Tool API 提交；Java 最多创建一个 generation_task、额度记录和生成 Outbox。
 10. Agent Run 进入 WAITING_TOOL，LangGraph Checkpoint 已持久化，当前 Graph 执行结束，Agent MQ 消息 ACK。
-11. 现有生成和转存消费者完成供应商调用、OSS 转存及 image_assets 落库。
+11. 现有 TS 生成和转存消费者完成供应商调用与 OSS 转存，Java 结果消费者原子完成 `image_assets` 落库和生成任务终态。
 12. Java 在至少形成一张可见资产的生成任务终态事务中创建 Agent Resume Outbox；零资产失败时保存稳定业务错误并发出失败恢复事件。
 13. TS 收到成功、部分成功或失败的恢复消息，读取共享数据库中的关联任务和资产安全摘要，校验 Run 状态与版本后，以同一 `thread_id` 恢复 Graph 并注入安全 Tool Result；零资产时调用 Java Finalization 提交稳定失败码，不再调用 Agent LLM 生成失败回复。
 14. 模型根据安全 Tool Result 生成最终用户回复；首轮不读取图片内容、不执行多模态视觉检查，也不在同一 Run 创建第二个生成任务。

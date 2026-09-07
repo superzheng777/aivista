@@ -1,0 +1,50 @@
+spring:
+  datasource:
+    url: jdbc:mysql://${TEST_DB_HOST:db.example}:3307/aivista?connectionTimeZone=UTC
+    username: aivista
+    password: db-secret
+  rabbitmq:
+    host: ${TEST_RABBIT_HOST:rabbit.example}
+    port: 5673
+    username: rabbit-user
+    password: rabbit-secret
+    virtual-host: /aivista
+app:
+  publication:
+    moderation:
+      endpoint: green.example
+      service: moderation-service
+      connect-timeout: 5s
+      read-timeout: 30s
+  generation:
+    queue:
+      enabled: true
+      exchange: custom.exchange
+      dead-letter-exchange: custom.dead-letter
+      generation-name: generation.task.execute
+      generation-routing-key: generation.execute
+      generation-consumer-concurrency: 7
+      transfer-name: generation.image.transfer
+      transfer-routing-key: generation.transfer
+      transfer-consumer-concurrency: 3
+      dispatcher-batch-size: 20
+      queue-timeout: 3m
+      queue-timeout-fixed-delay: 30s
+      transfer-timeout: 2m
+      transfer-timeout-fixed-delay: 30s
+    bailian:
+      endpoint: bailian.example
+      api-key: bailian-secret
+      read-timeout: 330s
+    oss:
+      endpoint: oss.example
+      bucket: images
+      access-key-id: access-id
+      access-key-secret: access-secret
+      signed-url-ttl: 10m
+    image-transfer:
+      source-read-timeout: 30s
+    asset-cleanup:
+      fixed-delay: 1m
+      retry-delay: 10m
+      batch-size: 100

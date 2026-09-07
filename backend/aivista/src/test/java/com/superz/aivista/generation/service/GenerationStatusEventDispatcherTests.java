@@ -66,8 +66,7 @@ class GenerationStatusEventDispatcherTests {
         return new GenerationStatusEventDispatcher(outboxMapper, taskMapper, connections,
                 new GenerationSseProperties(3, 1000, Duration.ofSeconds(15), Duration.ofSeconds(1), 100,
                         Duration.ofSeconds(30)),
-                new GenerationBailianProperties("https://example.com", "key", Duration.ofSeconds(5),
-                        Duration.ofSeconds(330), 25, 2, 3),
+                new GenerationBailianProperties(3),
                 Clock.fixed(NOW, ZoneOffset.UTC), new ObjectMapper());
     }
 

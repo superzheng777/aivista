@@ -1,0 +1,15 @@
+{
+  "contractVersion": 1,
+  "resultId": "provider-101-0-succeeded",
+  "phase": "PROVIDER",
+  "outcome": "SUCCEEDED",
+  "taskId": "101",
+  "taskVersion": 0,
+  "providerRequestId": "request-1",
+  "providerResultSnapshot": "{\"requestId\":\"request-1\",\"imageUrls\":[\"https://example.com/1.png\"],\"declaredWidth\":2048,\"declaredHeight\":2048}",
+  "declaredWidth": 2048,
+  "declaredHeight": 2048,
+  "expectedImageCount": 1,
+  "failureCode": null,
+  "images": []
+}

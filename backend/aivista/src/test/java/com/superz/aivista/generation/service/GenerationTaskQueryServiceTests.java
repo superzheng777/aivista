@@ -111,8 +111,7 @@ class GenerationTaskQueryServiceTests {
         return new GenerationTaskQueryService(taskMapper, imageMapper, ossClient,
                 new GenerationOssProperties("oss.example", "private-bucket", "key-id", "key-secret", "users",
                         Duration.ofMinutes(10), Duration.ofSeconds(5), Duration.ofSeconds(60)),
-                new GenerationBailianProperties("https://example.com", "key", Duration.ofSeconds(5),
-                        Duration.ofSeconds(330), 25, 2, 3),
+                new GenerationBailianProperties(3),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
