@@ -1,7 +1,7 @@
-export type GenerationTaskStatus = "QUEUED" | "RUNNING" | "TRANSFERRING" | "SUCCEEDED" | "PARTIALLY_SUCCEEDED" | "FAILED";
+export type GenerationTaskStatus = "QUEUED" | "SUCCEEDED" | "PARTIALLY_SUCCEEDED" | "FAILED";
 
 export function isActiveGenerationStatus(status: GenerationTaskStatus): boolean {
-  return status === "QUEUED" || status === "RUNNING" || status === "TRANSFERRING";
+  return status === "QUEUED";
 }
 
 /** 发布流程状态。`NONE` 表示从未提交或撤销发布后的初始状态。 */

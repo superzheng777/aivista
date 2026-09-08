@@ -20,10 +20,7 @@ import { AccentSquare, DotMatrix } from "@/shared/ui/editorial-ornaments/editori
 function taskStatusText(task: Pick<GenerationTask, "status" | "retryCount" | "maxRetryCount">): string {
   const retryProgress = `${task.retryCount}/${task.maxRetryCount}`;
   if (task.status === "QUEUED" && task.retryCount > 0) return `模型调用失败，正在重试（${retryProgress}）`;
-  if (task.status === "QUEUED") return "已排队，正在等待生成";
-  if (task.status === "RUNNING" && task.retryCount > 0) return `正在处理中（已重试 ${retryProgress}）`;
-  if (task.status === "RUNNING") return "正在生成图片";
-  if (task.status === "TRANSFERRING") return "图片已生成，正在保存";
+  if (task.status === "QUEUED") return "正在生成图片";
   if (task.status === "SUCCEEDED") return "生成已完成";
   if (task.status === "PARTIALLY_SUCCEEDED") return "部分图片已生成";
   if (task.status === "FAILED") return "生成失败";

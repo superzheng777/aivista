@@ -25,6 +25,10 @@ export function loadJavaLocalEnvironment(path: string | undefined, processEnviro
   }
   set("AIVISTA_DB_USERNAME", value("spring.datasource.username"));
   set("AIVISTA_DB_PASSWORD", value("spring.datasource.password"));
+  const serverPort = value("server.port");
+  const contextPath = value("server.servlet.context-path");
+  set("AIVISTA_JAVA_BASE_URL", `http://127.0.0.1:${serverPort ?? 8888}${contextPath ?? ""}`);
+  set("AIVISTA_GENERATION_WORKER_TOKEN", value("app.generation.worker-api.token"));
   set("AIVISTA_RABBITMQ_HOST", value("spring.rabbitmq.host"));
   set("AIVISTA_RABBITMQ_PORT", value("spring.rabbitmq.port"));
   set("AIVISTA_RABBITMQ_USERNAME", value("spring.rabbitmq.username"));
@@ -36,16 +40,10 @@ export function loadJavaLocalEnvironment(path: string | undefined, processEnviro
   set("AIVISTA_GENERATION_QUEUE_NAME", value("app.generation.queue.generation-name"));
   set("AIVISTA_GENERATION_ROUTING_KEY", value("app.generation.queue.generation-routing-key"));
   set("AIVISTA_GENERATION_CONSUMER_CONCURRENCY", value("app.generation.queue.generation-consumer-concurrency"));
-  set("AIVISTA_TRANSFER_QUEUE_NAME", value("app.generation.queue.transfer-name"));
-  set("AIVISTA_TRANSFER_ROUTING_KEY", value("app.generation.queue.transfer-routing-key"));
-  set("AIVISTA_TRANSFER_CONSUMER_CONCURRENCY", value("app.generation.queue.transfer-consumer-concurrency"));
-  set("AIVISTA_GENERATION_WORKER_RESULT_QUEUE_NAME", value("app.generation.queue.worker-result-name"));
-  set("AIVISTA_GENERATION_WORKER_RESULT_ROUTING_KEY", value("app.generation.queue.worker-result-routing-key"));
-  set("AIVISTA_GENERATION_WORKER_RESULT_DEAD_LETTER_QUEUE_NAME", value("app.generation.queue.worker-result-dead-letter-name"));
-  set("AIVISTA_GENERATION_WORKER_RESULT_DEAD_LETTER_ROUTING_KEY", value("app.generation.queue.worker-result-dead-letter-routing-key"));
   set("AIVISTA_BAILIAN_ENDPOINT", value("app.generation.bailian.endpoint"));
   set("AIVISTA_BAILIAN_API_KEY", value("app.generation.bailian.api-key"));
   set("AIVISTA_BAILIAN_READ_TIMEOUT_MS", durationMs(value("app.generation.bailian.read-timeout")));
+  set("AIVISTA_BAILIAN_MAX_RETRIES", value("app.generation.bailian.max-retries"));
   set("AIVISTA_GENERATION_MAX_CONCURRENT_CALLS", value("app.generation.bailian.max-concurrent-calls"));
   set("AIVISTA_GENERATION_RATE_LIMIT_PER_SECOND", value("app.generation.bailian.rate-limit-per-second"));
   set("AIVISTA_OSS_ENDPOINT", value("app.generation.oss.endpoint"));

@@ -83,10 +83,10 @@ class GenerationTaskQueryServiceTests {
     }
 
     @Test
-    void returnsNoImagesForRunningTask() {
+    void returnsNoImagesForQueuedTask() {
         GenerationTaskMapper taskMapper = mock(GenerationTaskMapper.class);
         ImageAssetMapper imageMapper = mock(ImageAssetMapper.class);
-        GenerationTask task = task("RUNNING");
+        GenerationTask task = task("QUEUED");
         when(taskMapper.selectOwnedById(7L, 301L)).thenReturn(task);
 
         GenerationTaskSnapshotResponse response = service(taskMapper, imageMapper, mock(OSS.class)).get(7L, 301L);

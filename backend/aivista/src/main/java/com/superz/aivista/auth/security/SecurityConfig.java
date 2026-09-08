@@ -51,6 +51,7 @@ public class SecurityConfig {
                                 "/auth/login",
                                 "/auth/refresh",
                                 "/auth/logout",
+                                "/internal/generation-worker/**",
                                 "/doc.html",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",

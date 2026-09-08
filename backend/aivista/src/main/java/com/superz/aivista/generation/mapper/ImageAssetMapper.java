@@ -238,7 +238,7 @@ public interface ImageAssetMapper extends BaseMapper<ImageAsset> {
             WHERE a.oss_cleanup_status = 'PENDING' AND a.oss_cleanup_available_at <= #{availableAt}
               AND NOT EXISTS (SELECT 1 FROM image_publications p WHERE p.asset_id = a.id AND p.public_at IS NOT NULL)
               AND NOT EXISTS (SELECT 1 FROM generation_task_input_assets i INNER JOIN generation_tasks t ON t.id = i.task_id
-                              WHERE i.asset_id = a.id AND t.status IN ('QUEUED', 'RUNNING', 'TRANSFERRING'))
+                              WHERE i.asset_id = a.id AND t.status = 'QUEUED')
             ORDER BY a.oss_cleanup_available_at ASC, a.id ASC LIMIT #{limit}
             """)
     List<ImageAsset> selectPendingOssCleanup(@Param("availableAt") Instant availableAt, @Param("limit") int limit);

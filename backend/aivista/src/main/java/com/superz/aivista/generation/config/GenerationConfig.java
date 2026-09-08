@@ -21,7 +21,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         GenerationAssetCleanupProperties.class,
         GenerationAssetUploadProperties.class,
         GenerationBailianProperties.class,
-        GenerationOssProperties.class
+        GenerationOssProperties.class,
+        GenerationWorkerApiProperties.class
 })
 public class GenerationConfig {
 

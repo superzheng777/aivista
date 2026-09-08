@@ -24,14 +24,9 @@ app:
       generation-name: generation.task.execute
       generation-routing-key: generation.execute
       generation-consumer-concurrency: 7
-      transfer-name: generation.image.transfer
-      transfer-routing-key: generation.transfer
-      transfer-consumer-concurrency: 3
       dispatcher-batch-size: 20
       queue-timeout: 3m
       queue-timeout-fixed-delay: 30s
-      transfer-timeout: 2m
-      transfer-timeout-fixed-delay: 30s
     bailian:
       endpoint: bailian.example
       api-key: bailian-secret

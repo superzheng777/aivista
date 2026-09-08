@@ -35,7 +35,7 @@ describe("isTaskUpdateEvent", () => {
     sessionId: "s1",
     taskId: "t1",
     taskVersion: 3,
-    status: "RUNNING",
+    status: "SUCCEEDED",
     retryCount: 0,
     maxRetryCount: 2,
   };
@@ -79,7 +79,7 @@ describe("isTerminalStatus", () => {
     for (const status of ["SUCCEEDED", "PARTIALLY_SUCCEEDED", "FAILED"]) {
       expect(isTerminalStatus(status as never)).toBe(true);
     }
-    for (const status of ["QUEUED", "RUNNING", "TRANSFERRING"]) {
+    for (const status of ["QUEUED"]) {
       expect(isTerminalStatus(status as never)).toBe(false);
     }
   });
@@ -111,12 +111,12 @@ describe("consumeSseStream", () => {
     const onPublicationUpdate = vi.fn();
     const body = [
       "event: generation.stream.ready\ndata: {}\n\n",
-      "event: generation.task.updated\ndata: {\"sessionId\":\"s1\",\"taskId\":\"t1\",\"taskVersion\":1,\"status\":\"RUNNING\",\"retryCount\":0,\"maxRetryCount\":2}\n\n",
+      "event: generation.task.updated\ndata: {\"sessionId\":\"s1\",\"taskId\":\"t1\",\"taskVersion\":1,\"status\":\"SUCCEEDED\",\"retryCount\":0,\"maxRetryCount\":2}\n\n",
       "event: publication.updated\ndata: {\"imageId\":\"img-1\",\"publicationVersion\":1,\"status\":\"APPROVED\",\"publicAt\":\"2026-08-10T00:00:00Z\"}\n\n",
     ];
     await consumeSseStream(streamOf(body), onReady, onTaskUpdate, onPublicationUpdate);
     expect(onReady).toHaveBeenCalledTimes(1);
-    expect(onTaskUpdate).toHaveBeenCalledWith(expect.objectContaining({ taskId: "t1", status: "RUNNING" }));
+    expect(onTaskUpdate).toHaveBeenCalledWith(expect.objectContaining({ taskId: "t1", status: "SUCCEEDED" }));
     expect(onPublicationUpdate).toHaveBeenCalledWith(expect.objectContaining({ imageId: "img-1", status: "APPROVED" }));
   });
 

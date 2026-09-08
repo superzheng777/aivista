@@ -57,8 +57,8 @@ function successBody() { return { request_id: "req-1", output: { choices: [{ fin
   { image: "https://provider/image.png" }, { text: "ignored" },
 ] } }] }, usage: { output_image_count: 1, output_width: 2048, output_height: 2048 } }; }
 function task() { return { id: 301n, user_id: 7n, session_id: 1n, creation_task_id: 1n, operation: "TEXT_TO_IMAGE",
-  model: "bailian/qwen-image-2.0", status: "RUNNING", task_version: 1, attempt_count: 0,
-  provider_call_started_at: null, final_prompt: "a city", final_negative_prompt: null, width: 2048, height: 2048,
+  model: "bailian/qwen-image-2.0", status: "QUEUED", task_version: 0, attempt_count: 0,
+  final_prompt: "a city", final_negative_prompt: null, width: 2048, height: 2048,
   prompt_extend: true, requested_image_count: 1, completed_image_count: 0, quota_refunded_at: null,
-  provider_request_id: null, provider_result_snapshot: null, failure_code: null, created_at: new Date(), updated_at: new Date(),
-  started_at: new Date(), completed_at: null, transfer_started_at: null }; }
+  provider_request_id: null, failure_code: null, created_at: new Date(), updated_at: new Date(),
+  completed_at: null }; }

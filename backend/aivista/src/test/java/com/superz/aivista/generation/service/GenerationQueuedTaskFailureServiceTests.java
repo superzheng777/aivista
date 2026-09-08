@@ -54,9 +54,9 @@ class GenerationQueuedTaskFailureServiceTests {
     }
 
     @Test
-    void leavesAlreadyClaimedTaskUntouched() {
+    void leavesTerminalTaskUntouched() {
         GenerationTask task = queuedTask();
-        task.setStatus("RUNNING");
+        task.setStatus("SUCCEEDED");
         when(taskMapper.selectByIdForUpdate(11L)).thenReturn(task);
 
         boolean changed = service.failIfStillQueued(11L, GenerationFailureCode.QUEUE_TIMEOUT, NOW);

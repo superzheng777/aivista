@@ -26,17 +26,13 @@ class GenerationOutboxDispatcherTests {
     private static final Instant NOW = Instant.parse("2026-08-20T12:00:00Z");
 
     @Test
-    void routesGenerationAndTransferCommandsThroughAlignedDirectExchangeKeys() {
+    void routesGenerationCommandsThroughTheConfiguredDirectExchangeKey() {
         OutboxEventMapper mapper = mock(OutboxEventMapper.class);
         RabbitTemplate template = mock(RabbitTemplate.class);
         OutboxEvent generation = event(11L, "GENERATION_TASK_EXECUTE", 1L);
-        OutboxEvent transfer = event(12L, "GENERATION_IMAGE_TRANSFER", 2L);
         when(mapper.selectAvailableByEventType("GENERATION_TASK_EXECUTE", NOW, 20))
                 .thenReturn(List.of(generation));
-        when(mapper.selectAvailableByEventType("GENERATION_IMAGE_TRANSFER", NOW, 20))
-                .thenReturn(List.of(transfer));
         when(mapper.claimPending(11L, NOW, NOW)).thenReturn(1);
-        when(mapper.claimPending(12L, NOW, NOW)).thenReturn(1);
         doAnswer(invocation -> {
             CorrelationData correlation = invocation.getArgument(3);
             correlation.getFuture().complete(new CorrelationData.Confirm(true, null));
@@ -44,15 +40,12 @@ class GenerationOutboxDispatcherTests {
         }).when(template).send(any(String.class), any(String.class), any(Message.class), any(CorrelationData.class));
 
         new GenerationOutboxDispatcher(mapper, mock(GenerationQueuedTaskFailureService.class),
-                mock(GenerationImageTransferFailureService.class), template, new ObjectMapper(), properties(),
+                template, new ObjectMapper(), properties(),
                 Clock.fixed(NOW, ZoneOffset.UTC)).dispatchAvailableEvents();
 
         verify(template).send(eq("aivista.generation.commands"), eq("generation.task.execute"),
                 any(Message.class), any(CorrelationData.class));
-        verify(template).send(eq("aivista.generation.commands"), eq("generation.image.transfer"),
-                any(Message.class), any(CorrelationData.class));
         verify(mapper).markPublished(11L, NOW);
-        verify(mapper).markPublished(12L, NOW);
     }
 
     @Test
@@ -62,12 +55,10 @@ class GenerationOutboxDispatcherTests {
         stale.setRetryCount(1);
         when(mapper.selectProcessingLockedBefore("GENERATION_TASK_EXECUTE", NOW.minusSeconds(30), 20))
                 .thenReturn(List.of(stale));
-        when(mapper.selectProcessingLockedBefore("GENERATION_IMAGE_TRANSFER", NOW.minusSeconds(30), 20))
-                .thenReturn(List.of());
         when(mapper.selectAvailableByEventType(any(String.class), eq(NOW), eq(20))).thenReturn(List.of());
 
         new GenerationOutboxDispatcher(mapper, mock(GenerationQueuedTaskFailureService.class),
-                mock(GenerationImageTransferFailureService.class), mock(RabbitTemplate.class), new ObjectMapper(),
+                mock(RabbitTemplate.class), new ObjectMapper(),
                 properties(), Clock.fixed(NOW, ZoneOffset.UTC)).dispatchAvailableEvents();
 
         verify(mapper).reschedule(11L, 2, NOW.plusSeconds(10), "Outbox processing lease expired");
@@ -81,12 +72,10 @@ class GenerationOutboxDispatcherTests {
         stale.setRetryCount(5);
         when(mapper.selectProcessingLockedBefore("GENERATION_TASK_EXECUTE", NOW.minusSeconds(30), 20))
                 .thenReturn(List.of(stale));
-        when(mapper.selectProcessingLockedBefore("GENERATION_IMAGE_TRANSFER", NOW.minusSeconds(30), 20))
-                .thenReturn(List.of());
         when(mapper.selectAvailableByEventType(any(String.class), eq(NOW), eq(20))).thenReturn(List.of());
 
-        new GenerationOutboxDispatcher(mapper, failures, mock(GenerationImageTransferFailureService.class),
-                mock(RabbitTemplate.class), new ObjectMapper(), properties(), Clock.fixed(NOW, ZoneOffset.UTC))
+        new GenerationOutboxDispatcher(mapper, failures, mock(RabbitTemplate.class),
+                new ObjectMapper(), properties(), Clock.fixed(NOW, ZoneOffset.UTC))
                 .dispatchAvailableEvents();
 
         verify(failures).failDelivery(11L, 301L, 1, NOW, "Outbox processing lease expired");
@@ -104,13 +93,9 @@ class GenerationOutboxDispatcherTests {
     }
 
     static GenerationQueueProperties properties() {
-        return new GenerationQueueProperties(true, "aivista.generation.commands", "aivista.generation.dead-letter",
+        return new GenerationQueueProperties(true, "aivista.generation.commands",
                 "generation.task.execute", "generation.task.execute",
-                "generation.image.transfer", "generation.image.transfer",
-                "generation.worker.result", "generation.worker.result",
-                "generation.worker.result.dead-letter", "generation.worker.result.dead-letter", 5,
                 Duration.ofSeconds(1), 20, Duration.ofSeconds(30), 5, Duration.ofSeconds(5),
-                Duration.ofMinutes(3), Duration.ofSeconds(30),
-                Duration.ofMinutes(2), Duration.ofSeconds(30));
+                Duration.ofMinutes(3), Duration.ofSeconds(30));
     }
 }

@@ -38,18 +38,6 @@ public class GenerationQueuedTaskFailureService {
         return failIfStillQueued(taskId, null, failureCode, now);
     }
 
-    @Transactional
-    public boolean failIfStillRunningBeforeProviderCall(long taskId, Instant now) {
-        GenerationTask task = taskMapper.selectByIdForUpdate(taskId);
-        if (task == null || !"RUNNING".equals(task.getStatus()) || task.getProviderCallStartedAt() != null
-                || taskMapper.failRunningBeforeProviderCall(taskId,
-                GenerationFailureCode.QUEUE_CONSUMPTION_FAILED.name(), now, now) != 1) {
-            return false;
-        }
-        refundAndPublish(task, now);
-        return true;
-    }
-
     /**
      * 仅当任务仍处于 {@code QUEUED} 时收敛失败。
      *

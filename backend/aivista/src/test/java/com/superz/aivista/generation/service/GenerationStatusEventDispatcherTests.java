@@ -48,7 +48,7 @@ class GenerationStatusEventDispatcherTests {
         OutboxEventMapper outboxMapper = mock(OutboxEventMapper.class);
         GenerationTaskMapper taskMapper = mock(GenerationTaskMapper.class);
         GenerationSseConnectionService connections = mock(GenerationSseConnectionService.class);
-        OutboxEvent event = event(99L, 301L, 3);
+        OutboxEvent event = event(99L, 301L, 0);
         when(outboxMapper.selectAvailableByEventType("GENERATION_TASK_STATUS_CHANGED", NOW, 100)).thenReturn(List.of(event));
         when(outboxMapper.claimPending(99L, NOW, NOW)).thenReturn(1);
         when(taskMapper.selectStatusEventTasksByIds(List.of(301L)))
@@ -57,7 +57,7 @@ class GenerationStatusEventDispatcherTests {
         dispatcher(outboxMapper, taskMapper, connections).dispatchAvailableEvents();
 
         verify(connections).publish(7L, 99L,
-                new GenerationTaskStatusEvent("201", "301", 3, "RUNNING", 1, 3));
+                new GenerationTaskStatusEvent("201", "301", 0, "QUEUED", 1, 3));
         verify(outboxMapper).markPublishedBatch(List.of(99L), NOW);
     }
 
@@ -73,7 +73,7 @@ class GenerationStatusEventDispatcherTests {
     @Test
     void requeuesExpiredProcessingEventBeforeDispatchingAvailableEvents() {
         OutboxEventMapper outboxMapper = mock(OutboxEventMapper.class);
-        OutboxEvent staleEvent = event(98L, 301L, 3);
+        OutboxEvent staleEvent = event(98L, 301L, 0);
         staleEvent.setRetryCount(2);
         when(outboxMapper.selectProcessingLockedBefore("GENERATION_TASK_STATUS_CHANGED", NOW.minusSeconds(30), 100))
                 .thenReturn(List.of(staleEvent));
@@ -92,7 +92,7 @@ class GenerationStatusEventDispatcherTests {
         event.setAggregateType("GENERATION_TASK");
         event.setAggregateId(taskId);
         event.setAggregateVersion((long) taskVersion);
-        event.setPayloadJson("{\"status\":\"" + (taskVersion == 3 ? "RUNNING" : "FAILED")
+        event.setPayloadJson("{\"status\":\"" + (taskVersion == 0 ? "QUEUED" : "FAILED")
                 + "\",\"modelRetryCount\":1}");
         return event;
     }

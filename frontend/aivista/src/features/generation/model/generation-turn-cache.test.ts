@@ -25,11 +25,11 @@ const page = (item: GenerationTurn) => ({ pages: [{ items: [item], nextBefore: n
 describe("generation turn cache", () => {
   it("keeps a newer SSE state when an older REST response arrives", () => {
     const current = applyGenerationTaskUpdateToTurns(page(turn(0, "QUEUED")), {
-      sessionId: "session-1", taskId: "task-1", taskVersion: 1, status: "RUNNING", retryCount: 0, maxRetryCount: 3,
+      sessionId: "session-1", taskId: "task-1", taskVersion: 1, status: "SUCCEEDED", retryCount: 0, maxRetryCount: 3,
     });
     const merged = mergeGenerationTurnPages(current, page(turn(0, "QUEUED")));
 
-    expect(merged.pages[0].items[0].generation).toMatchObject({ version: 1, status: "RUNNING" });
+    expect(merged.pages[0].items[0].generation).toMatchObject({ version: 1, status: "SUCCEEDED" });
   });
 
   it("allows same-version REST data to fill in complete fields", () => {
@@ -46,10 +46,10 @@ describe("generation turn cache", () => {
   });
 
   it("ignores a replayed SSE event with the same task version", () => {
-    const current = applyGenerationTaskUpdateToTurns(page(turn(1, "RUNNING")), {
+    const current = applyGenerationTaskUpdateToTurns(page(turn(1, "FAILED")), {
       sessionId: "session-1", taskId: "task-1", taskVersion: 1, status: "SUCCEEDED", retryCount: 0, maxRetryCount: 3,
     });
 
-    expect(current?.pages[0].items[0].generation).toMatchObject({ version: 1, status: "RUNNING" });
+    expect(current?.pages[0].items[0].generation).toMatchObject({ version: 1, status: "FAILED" });
   });
 });

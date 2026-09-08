@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { TaskExecuteMessage } from "./generation-task-execution-state.service.js";
+export interface TaskExecuteMessage { eventId: bigint; taskId: bigint; taskVersion: number }
 
 const schema = z.object({ eventId: z.string().regex(/^\d+$/), taskId: z.string().regex(/^\d+$/),
   taskVersion: z.number().int().nonnegative() }).passthrough();

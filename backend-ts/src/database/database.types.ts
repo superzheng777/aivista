@@ -12,13 +12,12 @@ export interface DatabaseSchema {
 }
 export interface GenerationTaskTable {
   id:Generated<bigint>; user_id:bigint; session_id:bigint; creation_task_id:bigint; operation:string; model:string;
-  status:string; task_version:Generated<number>; attempt_count:number; provider_call_started_at:DbDate|null;
+  status:string; task_version:Generated<number>; attempt_count:number;
   final_prompt:string; final_negative_prompt:string|null; width:number; height:number; prompt_extend:boolean;
   requested_image_count:number; completed_image_count:number; quota_refunded_at:DbDate|null;
-  provider_request_id:string|null; provider_result_snapshot:unknown|null;
+  provider_request_id:string|null;
   failure_code:string|null; created_at:ColumnType<Date,Date|string|undefined,Date|string>;
-  updated_at:ColumnType<Date,Date|string|undefined,Date|string>; started_at:DbDate|null; completed_at:DbDate|null;
-  transfer_started_at:DbDate|null;
+  updated_at:ColumnType<Date,Date|string|undefined,Date|string>; completed_at:DbDate|null;
 }
 
 export interface ImageAssetTable {

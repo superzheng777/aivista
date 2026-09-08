@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.superz.aivista.generation.config.GenerationQueueProperties;
 import com.superz.aivista.generation.entity.OutboxEvent;
 import com.superz.aivista.generation.mapper.OutboxEventMapper;
-import com.superz.aivista.generation.message.ImageTransferMessage;
 import com.superz.aivista.generation.message.TaskExecuteMessage;
 import com.superz.aivista.generation.model.OutboxEventType;
 import java.nio.charset.StandardCharsets;
@@ -24,7 +23,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
- * 将事务已提交的生成与图片转存 Outbox 命令可靠投递到 RabbitMQ。
+ * 将事务已提交的生成 Outbox 命令可靠投递到 RabbitMQ。
  *
  * <p>创建任务时不直接发送 MQ 消息，而是与任务记录同事务写入 Outbox；本服务随后条件领取事件，
  * 并仅在消息被目标队列接收且收到 Publisher Confirm 后标记为 {@code PUBLISHED}。投递失败会有限重试，
@@ -37,7 +36,6 @@ public class GenerationOutboxDispatcher {
 
     private final OutboxEventMapper outboxEventMapper;
     private final GenerationQueuedTaskFailureService queuedTaskFailureService;
-    private final GenerationImageTransferFailureService transferFailureService;
     private final RabbitTemplate rabbitTemplate;
     private final ObjectMapper objectMapper;
     private final GenerationQueueProperties properties;
@@ -45,31 +43,27 @@ public class GenerationOutboxDispatcher {
 
     public GenerationOutboxDispatcher(OutboxEventMapper outboxEventMapper,
             GenerationQueuedTaskFailureService queuedTaskFailureService,
-            GenerationImageTransferFailureService transferFailureService,
             RabbitTemplate rabbitTemplate, ObjectMapper objectMapper,
             GenerationQueueProperties properties, Clock clock) {
         this.outboxEventMapper = outboxEventMapper;
         this.queuedTaskFailureService = queuedTaskFailureService;
-        this.transferFailureService = transferFailureService;
         this.rabbitTemplate = rabbitTemplate;
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.clock = clock;
     }
 
-    /** 按固定周期扫描并条件领取当前可投递的生成与转存命令。 */
+    /** 按固定周期扫描并条件领取当前可投递的生成命令。 */
     @Scheduled(fixedDelayString = "${app.generation.queue.dispatcher-fixed-delay}")
     public void dispatchAvailableEvents() {
         Instant now = clock.instant();
         recoverExpiredProcessingEvents(now);
         dispatchAvailableEvents(OutboxEventType.GENERATION_TASK_EXECUTE, properties.generationRoutingKey(), now);
-        dispatchAvailableEvents(OutboxEventType.GENERATION_IMAGE_TRANSFER, properties.transferRoutingKey(), now);
     }
 
     /** Reclaims commands left in PROCESSING by an interrupted dispatcher instance. */
     private void recoverExpiredProcessingEvents(Instant now) {
         recoverExpiredProcessingEvents(OutboxEventType.GENERATION_TASK_EXECUTE, now);
-        recoverExpiredProcessingEvents(OutboxEventType.GENERATION_IMAGE_TRANSFER, now);
     }
 
     private void recoverExpiredProcessingEvents(OutboxEventType eventType, Instant now) {
@@ -111,11 +105,8 @@ public class GenerationOutboxDispatcher {
     }
 
     private Message taskMessage(OutboxEvent event) throws JsonProcessingException {
-        Object command = OutboxEventType.GENERATION_IMAGE_TRANSFER.name().equals(event.getEventType())
-                ? new ImageTransferMessage(event.getId(), event.getAggregateId(),
-                        Math.toIntExact(event.getAggregateVersion()))
-                : new TaskExecuteMessage(event.getId(), event.getAggregateId(),
-                        Math.toIntExact(event.getAggregateVersion()));
+        Object command = new TaskExecuteMessage(event.getId(), event.getAggregateId(),
+                Math.toIntExact(event.getAggregateVersion()));
         byte[] body = objectMapper.writeValueAsBytes(command);
         return MessageBuilder.withBody(body)
                 .setContentType(MessageProperties.CONTENT_TYPE_JSON)
@@ -132,13 +123,8 @@ public class GenerationOutboxDispatcher {
                     now.plus(properties.deliveryRetryDelay().multipliedBy(retries)), error);
             return;
         }
-        if (OutboxEventType.GENERATION_IMAGE_TRANSFER.name().equals(event.getEventType())) {
-            transferFailureService.failDelivery(event.getId(), event.getAggregateId(),
-                    Math.toIntExact(event.getAggregateVersion()), now, error);
-        } else {
-            queuedTaskFailureService.failDelivery(event.getId(), event.getAggregateId(),
-                    Math.toIntExact(event.getAggregateVersion()), now, error);
-        }
+        queuedTaskFailureService.failDelivery(event.getId(), event.getAggregateId(),
+                Math.toIntExact(event.getAggregateVersion()), now, error);
     }
 
 

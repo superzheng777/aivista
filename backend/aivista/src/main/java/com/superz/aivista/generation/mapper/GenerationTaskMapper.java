@@ -13,10 +13,10 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
 
     @Select("""
             SELECT id, user_id, session_id, creation_task_id, model, status, task_version,
-                   attempt_count, provider_call_started_at, final_prompt, final_negative_prompt,
+                   attempt_count, final_prompt, final_negative_prompt,
                    width, height, prompt_extend, requested_image_count, completed_image_count, quota_refunded_at,
-                   provider_request_id, provider_result_snapshot,
-                   failure_code, created_at, updated_at, started_at, completed_at
+                   provider_request_id,
+                   failure_code, created_at, updated_at, completed_at
             FROM generation_tasks
             WHERE id = #{taskId} AND user_id = #{userId}
             LIMIT 1
@@ -25,10 +25,10 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
 
     @Select("""
             SELECT id, user_id, session_id, creation_task_id, model, status, task_version,
-                   attempt_count, provider_call_started_at, final_prompt, final_negative_prompt,
+                   attempt_count, final_prompt, final_negative_prompt,
                    width, height, prompt_extend, requested_image_count, completed_image_count, quota_refunded_at,
-                   provider_request_id, provider_result_snapshot,
-                   failure_code, created_at, updated_at, started_at, completed_at
+                   provider_request_id,
+                   failure_code, created_at, updated_at, completed_at
             FROM generation_tasks
             WHERE id = #{taskId} AND user_id = #{userId}
             FOR UPDATE
@@ -66,7 +66,7 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
             <script>
             SELECT DISTINCT session_id
             FROM generation_tasks
-            WHERE status IN ('QUEUED', 'RUNNING', 'TRANSFERRING')
+            WHERE status = 'QUEUED'
               AND session_id IN
             <foreach collection="sessionIds" item="sessionId" open="(" separator="," close=")">#{sessionId}</foreach>
             </script>
@@ -76,10 +76,10 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
     @Select("""
             <script>
             SELECT id, user_id, session_id, creation_task_id, model, status, task_version,
-                   attempt_count, provider_call_started_at, final_prompt, final_negative_prompt,
+                   attempt_count, final_prompt, final_negative_prompt,
                    width, height, prompt_extend, requested_image_count, completed_image_count, quota_refunded_at,
-                   provider_request_id, provider_result_snapshot, transfer_started_at,
-                   failure_code, created_at, updated_at, started_at, completed_at
+                   provider_request_id,
+                   failure_code, created_at, updated_at, completed_at
             FROM generation_tasks
             WHERE creation_task_id IN
             <foreach collection="creationTaskIds" item="creationTaskId" open="(" separator="," close=")">
@@ -93,7 +93,7 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
             SELECT COUNT(*)
             FROM generation_tasks
             WHERE user_id = #{userId}
-              AND status IN ('QUEUED', 'RUNNING', 'TRANSFERRING')
+              AND status = 'QUEUED'
             """)
     int countActiveByUserId(@Param("userId") long userId);
 
@@ -101,16 +101,16 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
             SELECT COUNT(*)
             FROM generation_tasks
             WHERE session_id = #{sessionId}
-              AND status IN ('QUEUED', 'RUNNING', 'TRANSFERRING')
+              AND status = 'QUEUED'
             """)
     int countActiveBySessionId(@Param("sessionId") long sessionId);
 
     @Select("""
             SELECT id, user_id, session_id, creation_task_id, model, status, task_version,
-                   attempt_count, provider_call_started_at, final_prompt, final_negative_prompt,
+                   attempt_count, final_prompt, final_negative_prompt,
                    width, height, prompt_extend, requested_image_count, completed_image_count, quota_refunded_at,
-                   provider_request_id, provider_result_snapshot, transfer_started_at,
-                   failure_code, created_at, updated_at, started_at, completed_at
+                   provider_request_id,
+                   failure_code, created_at, updated_at, completed_at
             FROM generation_tasks
             WHERE id = #{taskId}
             FOR UPDATE
@@ -119,10 +119,10 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
 
     @Select("""
             SELECT id, user_id, session_id, creation_task_id, model, status, task_version,
-                   attempt_count, provider_call_started_at, final_prompt, final_negative_prompt,
+                   attempt_count, final_prompt, final_negative_prompt,
                    width, height, prompt_extend, requested_image_count, completed_image_count, quota_refunded_at,
-                   provider_request_id, provider_result_snapshot,
-                   failure_code, created_at, updated_at, started_at, completed_at
+                   provider_request_id,
+                   failure_code, created_at, updated_at, completed_at
             FROM generation_tasks
             WHERE status = 'QUEUED' AND updated_at < #{before}
             ORDER BY updated_at, id
@@ -142,104 +142,26 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
 
     @Update("""
             UPDATE generation_tasks
-            SET status = 'RUNNING', task_version = task_version + 1, started_at = #{now}, updated_at = #{now}
+            SET status = #{status}, task_version = task_version + 1, completed_image_count = #{completedImageCount},
+                failure_code = #{failureCode}, provider_request_id = #{providerRequestId},
+                completed_at = #{now}, updated_at = #{now}
             WHERE id = #{taskId} AND status = 'QUEUED' AND task_version = #{taskVersion}
             """)
-    int claimQueuedForExecution(@Param("taskId") long taskId, @Param("taskVersion") int taskVersion,
-            @Param("now") Instant now);
-
-    @Update("""
-            UPDATE generation_tasks
-            SET provider_call_started_at = #{now}, updated_at = #{now}
-            WHERE id = #{taskId} AND status = 'RUNNING' AND provider_call_started_at IS NULL
-            """)
-    int markProviderCallStarted(@Param("taskId") long taskId, @Param("now") Instant now);
-
-    @Update("""
-            UPDATE generation_tasks
-            SET status = 'QUEUED', task_version = task_version + 1, attempt_count = attempt_count + 1,
-                provider_call_started_at = NULL, updated_at = #{now}
-            WHERE id = #{taskId} AND status = 'RUNNING' AND task_version = #{taskVersion}
-            """)
-    int requeueRunningForRetry(@Param("taskId") long taskId, @Param("taskVersion") int taskVersion,
-            @Param("now") Instant now);
-
-    @Update("""
-            UPDATE generation_tasks
-            SET status = 'TRANSFERRING', task_version = task_version + 1,
-                provider_request_id = #{providerRequestId}, provider_result_snapshot = CAST(#{snapshot} AS JSON),
-                transfer_started_at = NULL, updated_at = #{now}
-            WHERE id = #{taskId} AND status = 'RUNNING' AND task_version = #{taskVersion}
-            """)
-    int markReadyForTransfer(@Param("taskId") long taskId, @Param("taskVersion") int taskVersion,
-            @Param("providerRequestId") String providerRequestId, @Param("snapshot") String snapshot,
-            @Param("now") Instant now);
-
-    @Update("""
-            UPDATE generation_tasks
-            SET transfer_started_at = #{now}, updated_at = #{now}
-            WHERE id = #{taskId} AND status = 'TRANSFERRING' AND task_version = #{taskVersion}
-              AND transfer_started_at IS NULL
-            """)
-    int markTransferStarted(@Param("taskId") long taskId, @Param("taskVersion") int taskVersion,
-            @Param("now") Instant now);
-
-    @Select("""
-            SELECT id, user_id, session_id, creation_task_id, model, status, task_version,
-                   attempt_count, provider_call_started_at, final_prompt, final_negative_prompt,
-                   width, height, prompt_extend, requested_image_count, completed_image_count, quota_refunded_at,
-                   provider_request_id, provider_result_snapshot, transfer_started_at,
-                   failure_code, created_at, updated_at, started_at, completed_at
-            FROM generation_tasks
-            WHERE status = 'TRANSFERRING' AND transfer_started_at IS NULL AND updated_at < #{before}
-            ORDER BY updated_at, id
-            LIMIT #{limit}
-            """)
-    List<GenerationTask> selectTransferWaitingBefore(@Param("before") Instant before, @Param("limit") int limit);
-
-    @Update("""
-            UPDATE generation_tasks
-            SET provider_request_id = #{providerRequestId}, updated_at = #{now}
-            WHERE id = #{taskId} AND status = 'RUNNING'
-            """)
-    int saveProviderRequestId(@Param("taskId") long taskId, @Param("providerRequestId") String providerRequestId,
-            @Param("now") Instant now);
-
-    @Update("""
-            UPDATE generation_tasks
-            SET status = #{status}, task_version = task_version + 1, completed_image_count = #{completedImageCount},
-                failure_code = #{failureCode}, provider_result_snapshot = NULL, completed_at = #{now}, updated_at = #{now}
-            WHERE id = #{taskId} AND status = 'TRANSFERRING' AND task_version = #{taskVersion}
-            """)
-    int completeTransferring(@Param("taskId") long taskId, @Param("taskVersion") int taskVersion,
-            @Param("status") String status,
-            @Param("completedImageCount") int completedImageCount, @Param("failureCode") String failureCode,
+    int completeQueuedPipeline(@Param("taskId") long taskId, @Param("taskVersion") int taskVersion,
+            @Param("status") String status, @Param("completedImageCount") int completedImageCount,
+            @Param("failureCode") String failureCode, @Param("providerRequestId") String providerRequestId,
             @Param("now") Instant now);
 
     @Update("""
             UPDATE generation_tasks
             SET status = 'FAILED', task_version = task_version + 1, failure_code = #{failureCode},
-                provider_result_snapshot = NULL, completed_at = #{now}, updated_at = #{now}
-            WHERE id = #{taskId} AND status = 'TRANSFERRING' AND task_version = #{taskVersion}
+                provider_request_id = #{providerRequestId},
+                quota_refunded_at = COALESCE(#{quotaRefundedAt}, quota_refunded_at),
+                completed_at = #{now}, updated_at = #{now}
+            WHERE id = #{taskId} AND status = 'QUEUED' AND task_version = #{taskVersion}
             """)
-    int failTransferring(@Param("taskId") long taskId, @Param("taskVersion") int taskVersion,
-            @Param("failureCode") String failureCode, @Param("now") Instant now);
-
-    @Update("""
-            UPDATE generation_tasks
-            SET status = 'FAILED', task_version = task_version + 1, failure_code = #{failureCode},
-                quota_refunded_at = COALESCE(#{quotaRefundedAt}, quota_refunded_at), completed_at = #{now}, updated_at = #{now}
-            WHERE id = #{taskId} AND status = 'RUNNING'
-            """)
-    int failRunning(@Param("taskId") long taskId, @Param("failureCode") String failureCode,
+    int failQueuedPipeline(@Param("taskId") long taskId, @Param("taskVersion") int taskVersion,
+            @Param("failureCode") String failureCode, @Param("providerRequestId") String providerRequestId,
             @Param("quotaRefundedAt") Instant quotaRefundedAt, @Param("now") Instant now);
 
-    @Update("""
-            UPDATE generation_tasks
-            SET status = 'FAILED', task_version = task_version + 1, failure_code = #{failureCode},
-                quota_refunded_at = COALESCE(#{quotaRefundedAt}, quota_refunded_at), completed_at = #{now}, updated_at = #{now}
-            WHERE id = #{taskId} AND status = 'RUNNING' AND provider_call_started_at IS NULL
-            """)
-    int failRunningBeforeProviderCall(@Param("taskId") long taskId, @Param("failureCode") String failureCode,
-            @Param("quotaRefundedAt") Instant quotaRefundedAt, @Param("now") Instant now);
 }
