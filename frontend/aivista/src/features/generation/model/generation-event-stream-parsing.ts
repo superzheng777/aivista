@@ -20,10 +20,26 @@ export type PublicationStatusUpdateEvent = {
 
 export type GenerationSessionIndicator = "ACTIVE" | "COMPLETED" | "ATTENTION";
 
+export type AgentRealtimeEvent = {
+  creationTaskId: string;
+  sessionId: string;
+  revision: number;
+  streamId: string;
+  sequence: number;
+  eventType: "RUN_STARTED" | "TEXT_STARTED" | "TEXT_DELTA" | "TEXT_FINISHED"
+    | "SKILL_SELECTED" | "TOOL_STARTED" | "TOOL_PROGRESS" | "TOOL_FINISHED"
+    | "RUN_FINISHED" | "RUN_FAILED";
+  payload: Record<string, unknown>;
+};
+
+export type AgentLiveRun = { streamId: string; revision: number; sequence: number; text: string;
+  tools: Array<{ toolCallId: string; toolName: string; state: "RUNNING" | "SUCCEEDED" | "FAILED" }> };
+
 export const TASK_EVENT_NAME = "generation.task.updated";
 export const PUBLICATION_EVENT_NAME = "publication.updated";
 export const READY_EVENT_NAME = "generation.stream.ready";
 export const INTERACTION_NOTIFICATION_EVENT_NAME = "interaction.notification.created";
+export const AGENT_EVENT_NAME = "agent.creation.event";
 export const MAX_RECONNECT_DELAY_MS = 3_000;
 
 /** 发布终态：只有这些状态才允许驱动“信号 → 全量重拉”。 */
@@ -47,6 +63,48 @@ export function isPublicationStatusUpdateEvent(value: unknown): value is Publica
   if (typeof event.publicationVersion !== "number" || !Number.isSafeInteger(event.publicationVersion)) return false;
   if (typeof event.status !== "string" || !PUBLICATION_TERMINAL_STATUSES.has(event.status)) return false;
   return event.publicAt === null || typeof event.publicAt === "string";
+}
+
+export function isAgentRealtimeEvent(value: unknown): value is AgentRealtimeEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Partial<AgentRealtimeEvent>;
+  return typeof event.creationTaskId === "string" && typeof event.sessionId === "string"
+    && Number.isSafeInteger(event.revision) && typeof event.streamId === "string" && event.streamId.length > 0
+    && Number.isSafeInteger(event.sequence) && (event.sequence ?? 0) > 0
+    && typeof event.eventType === "string" && AGENT_EVENT_TYPES.has(event.eventType)
+    && !!event.payload && typeof event.payload === "object" && !Array.isArray(event.payload);
+}
+
+const AGENT_EVENT_TYPES: ReadonlySet<string> = new Set(["RUN_STARTED", "TEXT_STARTED", "TEXT_DELTA",
+  "TEXT_FINISHED", "SKILL_SELECTED", "TOOL_STARTED", "TOOL_PROGRESS", "TOOL_FINISHED",
+  "RUN_FINISHED", "RUN_FAILED"]);
+
+export function applyAgentRealtimeEvent(current: AgentLiveRun | undefined,
+    event: AgentRealtimeEvent): AgentLiveRun {
+  if (current && event.revision < current.revision) return current;
+  if (current && event.streamId === current.streamId && event.sequence <= current.sequence) return current;
+  const next = !current || event.streamId !== current.streamId
+    ? { streamId: event.streamId, revision: event.revision, sequence: 0, text: "", tools: [] }
+    : { ...current, tools: [...current.tools] };
+  next.sequence = event.sequence;
+  if (event.eventType === "RUN_STARTED") return { ...next, text: "", tools: [] };
+  if (event.eventType === "TEXT_DELTA" && typeof event.payload.delta === "string") {
+    next.text += event.payload.delta;
+  }
+  if (event.eventType === "TOOL_STARTED" && toolPayload(event.payload)) {
+    next.tools = [...next.tools.filter((tool) => tool.toolCallId !== event.payload.toolCallId),
+      { toolCallId: event.payload.toolCallId, toolName: event.payload.toolName, state: "RUNNING" }];
+  }
+  if (event.eventType === "TOOL_FINISHED" && toolPayload(event.payload)) {
+    const state = event.payload.outcome === "FAILED" ? "FAILED" : "SUCCEEDED";
+    next.tools = next.tools.map((tool) => tool.toolCallId === event.payload.toolCallId ? { ...tool, state } : tool);
+  }
+  return next;
+}
+
+function toolPayload(payload: Record<string, unknown>): payload is Record<string, unknown>
+    & { toolCallId: string; toolName: string } {
+  return typeof payload.toolCallId === "string" && typeof payload.toolName === "string";
 }
 
 export function isTerminalStatus(status: GenerationTaskStatus): boolean {
@@ -74,6 +132,7 @@ export async function consumeSseStream(
   onTaskUpdate: (event: GenerationTaskUpdateEvent) => void,
   onPublicationUpdate: (event: PublicationStatusUpdateEvent) => void,
   onInteractionNotification: () => void = () => undefined,
+  onAgentEvent: (event: AgentRealtimeEvent) => void = () => undefined,
 ): Promise<void> {
   if (!response.body) throw new Error("The event stream has no response body.");
   const reader = response.body.getReader();
@@ -100,6 +159,8 @@ export async function consumeSseStream(
           onTaskUpdate(event);
         } else if (parsed.eventName === PUBLICATION_EVENT_NAME && isPublicationStatusUpdateEvent(event)) {
           onPublicationUpdate(event);
+        } else if (parsed.eventName === AGENT_EVENT_NAME && isAgentRealtimeEvent(event)) {
+          onAgentEvent(event);
         }
       } catch {
         // REST reconciliation after the next connection remains authoritative.

@@ -9,6 +9,7 @@ export interface DatabaseSchema {
   user_generation_daily_usage: UserGenerationDailyUsageTable;
   outbox_events: OutboxEventTable;
   generation_worker_executions: GenerationWorkerExecutionTable;
+  agent_worker_executions: AgentWorkerExecutionTable;
 }
 export interface GenerationTaskTable {
   id:Generated<bigint>; user_id:bigint; session_id:bigint; creation_task_id:bigint; operation:string; model:string;
@@ -39,5 +40,13 @@ export interface OutboxEventTable {
 export interface GenerationWorkerExecutionTable {
   task_id: bigint; phase: string; task_version: number; state: string; result_json: string | null;
   created_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  updated_at: DbDate;
+}
+export interface AgentWorkerExecutionTable {
+  creation_task_id: bigint;
+  state: string;
+  result_json: string | null;
+  started_at: DbDate;
+  completed_at: DbDate | null;
   updated_at: DbDate;
 }

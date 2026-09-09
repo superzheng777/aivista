@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.superz.aivista.generation.config.GenerationQueueProperties;
@@ -18,12 +19,38 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 class GenerationOutboxDispatcherTests {
     private static final Instant NOW = Instant.parse("2026-08-20T12:00:00Z");
+
+    @Test
+    void routesAgentCommandsWithTheAgentMessageContract() throws Exception {
+        OutboxEventMapper mapper = mock(OutboxEventMapper.class);
+        RabbitTemplate template = mock(RabbitTemplate.class);
+        OutboxEvent agent = event(12L, "AGENT_EXECUTE", 3L);
+        when(mapper.selectAvailableByEventType("AGENT_EXECUTE", NOW, 20)).thenReturn(List.of(agent));
+        when(mapper.claimPending(12L, NOW, NOW)).thenReturn(1);
+        ArgumentCaptor<Message> message = ArgumentCaptor.forClass(Message.class);
+        doAnswer(invocation -> {
+            CorrelationData correlation = invocation.getArgument(3);
+            correlation.getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(template).send(any(String.class), any(String.class), any(Message.class), any(CorrelationData.class));
+
+        new GenerationOutboxDispatcher(mapper, mock(GenerationQueuedTaskFailureService.class),
+                mock(AgentQueuedCreationFailureService.class), template, new ObjectMapper(), properties(),
+                Clock.fixed(NOW, ZoneOffset.UTC)).dispatchAvailableEvents();
+
+        verify(template).send(eq("aivista.generation.commands"), eq("agent.creation.execute"),
+                message.capture(), any(CorrelationData.class));
+        assertThat(new ObjectMapper().readTree(message.getValue().getBody()))
+                .isEqualTo(new ObjectMapper().readTree(
+                        "{\"eventId\":12,\"creationTaskId\":301,\"revision\":3}"));
+    }
 
     @Test
     void routesGenerationCommandsThroughTheConfiguredDirectExchangeKey() {
@@ -40,6 +67,7 @@ class GenerationOutboxDispatcherTests {
         }).when(template).send(any(String.class), any(String.class), any(Message.class), any(CorrelationData.class));
 
         new GenerationOutboxDispatcher(mapper, mock(GenerationQueuedTaskFailureService.class),
+                mock(AgentQueuedCreationFailureService.class),
                 template, new ObjectMapper(), properties(),
                 Clock.fixed(NOW, ZoneOffset.UTC)).dispatchAvailableEvents();
 
@@ -58,6 +86,7 @@ class GenerationOutboxDispatcherTests {
         when(mapper.selectAvailableByEventType(any(String.class), eq(NOW), eq(20))).thenReturn(List.of());
 
         new GenerationOutboxDispatcher(mapper, mock(GenerationQueuedTaskFailureService.class),
+                mock(AgentQueuedCreationFailureService.class),
                 mock(RabbitTemplate.class), new ObjectMapper(),
                 properties(), Clock.fixed(NOW, ZoneOffset.UTC)).dispatchAvailableEvents();
 
@@ -74,7 +103,8 @@ class GenerationOutboxDispatcherTests {
                 .thenReturn(List.of(stale));
         when(mapper.selectAvailableByEventType(any(String.class), eq(NOW), eq(20))).thenReturn(List.of());
 
-        new GenerationOutboxDispatcher(mapper, failures, mock(RabbitTemplate.class),
+        new GenerationOutboxDispatcher(mapper, failures, mock(AgentQueuedCreationFailureService.class),
+                mock(RabbitTemplate.class),
                 new ObjectMapper(), properties(), Clock.fixed(NOW, ZoneOffset.UTC))
                 .dispatchAvailableEvents();
 
@@ -94,6 +124,7 @@ class GenerationOutboxDispatcherTests {
 
     static GenerationQueueProperties properties() {
         return new GenerationQueueProperties(true, "aivista.generation.commands",
+                "agent.creation.execute", "agent.creation.execute",
                 "generation.task.execute", "generation.task.execute",
                 Duration.ofSeconds(1), 20, Duration.ofSeconds(30), 5, Duration.ofSeconds(5),
                 Duration.ofMinutes(3), Duration.ofSeconds(30));

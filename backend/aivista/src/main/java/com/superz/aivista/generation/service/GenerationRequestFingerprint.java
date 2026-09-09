@@ -20,6 +20,18 @@ final class GenerationRequestFingerprint {
                 + field("promptExtend", Boolean.toString(promptExtend))
                 + field("imageCount", Integer.toString(imageCount))
                 + field("inputAssetIds", inputAssetIds.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
+        return digest(canonical);
+    }
+
+    static String sha256Agent(long userId, String sessionIdentity, String prompt, List<Long> inputAssetIds) {
+        return digest(field("userId", Long.toString(userId))
+                + field("session", sessionIdentity)
+                + field("prompt", prompt)
+                + field("inputAssetIds", inputAssetIds.stream().map(String::valueOf)
+                        .collect(java.util.stream.Collectors.joining(","))));
+    }
+
+    private static String digest(String canonical) {
         try {
             return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(canonical.getBytes(StandardCharsets.UTF_8)));

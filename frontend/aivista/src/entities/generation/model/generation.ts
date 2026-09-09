@@ -43,10 +43,26 @@ export type ConversationMessage = {
 export type GenerationTurn = {
   id: string;
   mode: "NORMAL" | "AGENT";
+  status: "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  failureCode: string | null;
+  revision: number;
   userMessage: ConversationMessage;
-  assistantMessage: ConversationMessage;
-  normalGenerationRequest: { negativePrompt: string | null };
-  generation: GenerationTask;
+  assistantMessage: ConversationMessage | null;
+  normalGenerationRequest: { negativePrompt: string | null } | null;
+  generations: GenerationTask[];
+  activities: CreationActivity[];
+};
+
+export type CreationActivity = {
+  activityKey: string;
+  sequenceNo: number;
+  type: "NARRATION" | "SKILL" | "TOOL";
+  state: "RUNNING" | "COMPLETED" | "FAILED";
+  content: string;
+  toolName: string | null;
+  generationTaskId: string | null;
+  startedAt: string;
+  completedAt: string | null;
 };
 
 export type GenerationAsset = {

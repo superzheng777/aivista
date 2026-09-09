@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 
 import com.superz.aivista.generation.entity.GenerationTask;
 import com.superz.aivista.generation.mapper.GenerationTaskMapper;
+import com.superz.aivista.generation.mapper.CreationTaskMapper;
+import com.superz.aivista.generation.entity.CreationTask;
 import com.superz.aivista.generation.mapper.ImageAssetMapper;
 import com.superz.aivista.generation.mapper.OutboxEventMapper;
 import com.superz.aivista.generation.mapper.UserGenerationDailyUsageMapper;
@@ -21,10 +23,11 @@ import org.junit.jupiter.api.Test;
 class GenerationCompletionServiceTests {
     private static final Instant NOW = Instant.parse("2026-09-08T00:00:00Z");
     private final GenerationTaskMapper tasks = mock(GenerationTaskMapper.class);
+    private final CreationTaskMapper creations = mock(CreationTaskMapper.class);
     private final ImageAssetMapper images = mock(ImageAssetMapper.class);
     private final OutboxEventMapper outbox = mock(OutboxEventMapper.class);
     private final UserGenerationDailyUsageMapper usage = mock(UserGenerationDailyUsageMapper.class);
-    private final GenerationCompletionService service = new GenerationCompletionService(tasks, images, outbox, usage,
+    private final GenerationCompletionService service = new GenerationCompletionService(tasks, creations, images, outbox, usage,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
     @Test
@@ -32,6 +35,7 @@ class GenerationCompletionServiceTests {
         GenerationTask queued = task("QUEUED", 0);
         GenerationTask succeeded = task("SUCCEEDED", 1);
         when(tasks.selectByIdForUpdate(101L)).thenReturn(queued, succeeded);
+        when(creations.selectByIdForUpdate(151L)).thenReturn(normalCreation());
         when(tasks.completeQueuedPipeline(101L, 0, "SUCCEEDED", 1, null, "provider-1", NOW)).thenReturn(1);
         when(images.selectByOriginTaskId(101L)).thenReturn(List.of());
         var image = new GenerationCompletionCommand.CompletedImage(0, "users/7/tasks/101/0", "image/png",
@@ -44,6 +48,7 @@ class GenerationCompletionServiceTests {
         verify(images).insertSelective(org.mockito.ArgumentMatchers.argThat(asset ->
                 "users/7/tasks/101/0/original.png".equals(asset.getOriginalObjectKey())));
         verify(tasks).completeQueuedPipeline(101L, 0, "SUCCEEDED", 1, null, "provider-1", NOW);
+        verify(creations).completeRunning(151L, 0L, "SUCCEEDED", null, NOW);
     }
 
     @Test
@@ -66,6 +71,7 @@ class GenerationCompletionServiceTests {
         GenerationTask task = new GenerationTask();
         task.setId(101L);
         task.setUserId(7L);
+        task.setCreationTaskId(151L);
         task.setStatus(status);
         task.setTaskVersion(version);
         task.setAttemptCount(0);
@@ -74,5 +80,14 @@ class GenerationCompletionServiceTests {
         task.setRequestedImageCount(1);
         task.setCreatedAt(NOW);
         return task;
+    }
+
+    private static CreationTask normalCreation() {
+        CreationTask creation = new CreationTask();
+        creation.setId(151L);
+        creation.setMode("NORMAL");
+        creation.setStatus("RUNNING");
+        creation.setRevision(0L);
+        return creation;
     }
 }

@@ -16,6 +16,9 @@ import {
   type GenerationSessionIndicator,
   type GenerationStreamStatus,
   type GenerationTaskUpdateEvent,
+  applyAgentRealtimeEvent,
+  type AgentLiveRun,
+  type AgentRealtimeEvent,
 } from "@/features/generation/model/generation-event-stream-parsing";
 
 export type { GenerationSessionIndicator } from "@/features/generation/model/generation-event-stream-parsing";
@@ -34,6 +37,7 @@ type GenerationEventStreamContextValue = {
   /** 发布相关的刷新信号：收到 publication.updated 时自增。 */
   publicationRefreshVersion: number;
   notificationRefreshVersion: number;
+  agentRuns: Record<string, AgentLiveRun>;
   acknowledgeSession: (sessionId: string) => void;
   acknowledgeCompletedResults: () => void;
 };
@@ -70,6 +74,7 @@ export function GenerationEventStreamProvider({ children }: { children: ReactNod
   const [syncVersion, setSyncVersion] = useState(0);
   const [publicationRefreshVersion, setPublicationRefreshVersion] = useState(0);
   const [notificationRefreshVersion, setNotificationRefreshVersion] = useState(0);
+  const [agentRuns, setAgentRuns] = useState<Record<string, AgentLiveRun>>({});
   const readyRef = useRef(false);
   const everReadyRef = useRef(false);
   const lifecycleControllerRef = useRef<AbortController | null>(null);
@@ -105,6 +110,25 @@ export function GenerationEventStreamProvider({ children }: { children: ReactNod
     // The SSE event carries no unread count or message body; consumers refresh their own queries.
     setPublicationRefreshVersion((current) => current + 1);
   }, []);
+  const applyAgentEvent = useCallback((event: AgentRealtimeEvent) => {
+    if (event.eventType === "RUN_FINISHED" || event.eventType === "RUN_FAILED") {
+      setAgentRuns((current) => {
+        if (!(event.creationTaskId in current)) return current;
+        const next = { ...current };
+        delete next[event.creationTaskId];
+        return next;
+      });
+      void Promise.all([
+        queryClient.refetchQueries({ queryKey: generationQueryKeys.sessions(), type: "active" }),
+        queryClient.refetchQueries({ queryKey: generationQueryKeys.turns(event.sessionId), type: "active" }),
+      ]);
+      return;
+    }
+    setAgentRuns((current) => {
+      const next = applyAgentRealtimeEvent(current[event.creationTaskId], event);
+      return next === current[event.creationTaskId] ? current : { ...current, [event.creationTaskId]: next };
+    });
+  }, [queryClient]);
 
   const startBatch = useCallback((): Promise<boolean> => {
     if (readyRef.current) return Promise.resolve(true);
@@ -148,7 +172,9 @@ export function GenerationEventStreamProvider({ children }: { children: ReactNod
 
           let serverReady = false;
           let connectionAccepted = false;
-          const streamDone = consumeSseStream(response, () => { serverReady = true; }, applyTaskUpdate, applyPublicationUpdate, () => setNotificationRefreshVersion((current) => current + 1))
+          const streamDone = consumeSseStream(response, () => { serverReady = true; setAgentRuns({}); },
+            applyTaskUpdate, applyPublicationUpdate,
+            () => setNotificationRefreshVersion((current) => current + 1), applyAgentEvent)
             .catch(() => undefined)
             .finally(() => {
               if (connectionSequenceRef.current !== sequence || lifecycleController.signal.aborted) return;
@@ -187,7 +213,7 @@ export function GenerationEventStreamProvider({ children }: { children: ReactNod
 
     batchRef.current = batch;
     return batch;
-  }, [applyPublicationUpdate, applyTaskUpdate]);
+  }, [applyAgentEvent, applyPublicationUpdate, applyTaskUpdate]);
 
   const ensureReady = useCallback(async (): Promise<boolean> => {
     if (readyRef.current) return true;
@@ -223,6 +249,7 @@ export function GenerationEventStreamProvider({ children }: { children: ReactNod
       queueMicrotask(() => {
         setCompletedSessionIds(new Set());
         setAttentionSessionIds(new Set());
+        setAgentRuns({});
       });
       return;
     }
@@ -268,7 +295,8 @@ export function GenerationEventStreamProvider({ children }: { children: ReactNod
     <GenerationEventStreamContext value={{ status: authStatus === "authenticated" ? status : "DISCONNECTED",
       reconnectAttempt: authStatus === "authenticated" ? reconnectAttempt : 0,
       ensureReady, retryNow, sessionIndicators, hasCompletedResults: completedSessionIds.size > 0, hasAttention: attentionSessionIds.size > 0,
-      syncVersion, publicationRefreshVersion, notificationRefreshVersion, acknowledgeSession, acknowledgeCompletedResults }}>
+      syncVersion, publicationRefreshVersion, notificationRefreshVersion, agentRuns,
+      acknowledgeSession, acknowledgeCompletedResults }}>
       {children}
     </GenerationEventStreamContext>
   );

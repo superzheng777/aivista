@@ -7,9 +7,11 @@
     "build": "tsc -p tsconfig.build.json",
     "worker": "node dist/worker.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --pool=threads"
+    "test": "vitest run --pool=threads",
+    "test:agent-smoke": "vitest run test/integration/pi-bailian-smoke.test.ts --pool=threads"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.83.0",
     "@nestjs/common": "^11.1.6",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.1.6",
@@ -19,9 +21,11 @@
     "mysql2": "^3.15.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "typebox": "1.3.7",
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "0.83.0",
     "@types/ali-oss": "^6.23.3",
     "@types/amqplib": "^0.10.8",
     "@types/node": "^24.10.1",

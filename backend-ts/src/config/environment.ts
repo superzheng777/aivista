@@ -29,6 +29,15 @@ export const environmentSchema = z.object({
   AIVISTA_BAILIAN_API_KEY: optionalNonEmpty,
   AIVISTA_BAILIAN_READ_TIMEOUT_MS: z.coerce.number().int().positive().default(330_000),
   AIVISTA_BAILIAN_MAX_RETRIES: z.coerce.number().int().nonnegative().default(3),
+  AIVISTA_AGENT_ENABLED: z.stringbool().default(false),
+  AIVISTA_AGENT_MODEL: z.string().min(1).default("qwen3.8-flash"),
+  AIVISTA_AGENT_BAILIAN_BASE_URL: optionalNonEmpty,
+  AIVISTA_AGENT_BAILIAN_API_KEY: optionalNonEmpty,
+  AIVISTA_AGENT_THINKING_ENABLED: z.stringbool().default(false),
+  AIVISTA_AGENT_MAX_TURNS: z.coerce.number().int().min(1).max(20).default(20),
+  AIVISTA_AGENT_MAX_CONCURRENT: z.coerce.number().int().positive().default(4),
+  AIVISTA_AGENT_TOOL_WAIT_TIMEOUT_MS: z.coerce.number().int().positive().default(660_000),
+  AIVISTA_AGENT_LOOP_TIMEOUT_MS: z.coerce.number().int().positive().default(1_200_000),
   AIVISTA_RABBITMQ_HOST: optionalNonEmpty,
   AIVISTA_RABBITMQ_PORT: z.coerce.number().int().min(1).max(65_535).default(5672),
   AIVISTA_RABBITMQ_USERNAME: optionalNonEmpty,
@@ -36,11 +45,18 @@ export const environmentSchema = z.object({
   AIVISTA_RABBITMQ_VHOST: z.string().min(1).default("/aivista"),
   AIVISTA_GENERATION_QUEUE_ENABLED: z.stringbool().default(false),
   AIVISTA_GENERATION_EXCHANGE: z.string().min(1).default("aivista.generation.commands"),
+  AIVISTA_AGENT_QUEUE_NAME: z.string().min(1).default("agent.creation.execute"),
+  AIVISTA_AGENT_ROUTING_KEY: z.string().min(1).default("agent.creation.execute"),
   AIVISTA_GENERATION_DEAD_LETTER_EXCHANGE: z.string().min(1).default("aivista.generation.dead-letter"),
   AIVISTA_GENERATION_QUEUE_NAME: z.string().min(1).default("generation.task.execute"),
   AIVISTA_GENERATION_CONSUMER_CONCURRENCY: z.coerce.number().int().positive().default(25),
   AIVISTA_GENERATION_ROUTING_KEY: z.string().min(1).default("generation.task.execute"),
   AIVISTA_RABBITMQ_CONFIRM_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+}).superRefine((value, context) => {
+  if (value.AIVISTA_AGENT_ENABLED && !value.AIVISTA_GENERATION_QUEUE_ENABLED) {
+    context.addIssue({ code: "custom", path: ["AIVISTA_GENERATION_QUEUE_ENABLED"],
+      message: "Agent mode requires the Generation consumer because Agent tools reuse its pipeline" });
+  }
 });
 
 export type Environment = z.infer<typeof environmentSchema>;

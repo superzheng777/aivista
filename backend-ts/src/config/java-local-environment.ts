@@ -36,6 +36,8 @@ export function loadJavaLocalEnvironment(path: string | undefined, processEnviro
   set("AIVISTA_RABBITMQ_VHOST", value("spring.rabbitmq.virtual-host"));
   set("AIVISTA_GENERATION_QUEUE_ENABLED", booleanString(value("app.generation.queue.enabled")));
   set("AIVISTA_GENERATION_EXCHANGE", value("app.generation.queue.exchange"));
+  set("AIVISTA_AGENT_QUEUE_NAME", value("app.generation.queue.agent-name"));
+  set("AIVISTA_AGENT_ROUTING_KEY", value("app.generation.queue.agent-routing-key"));
   set("AIVISTA_GENERATION_DEAD_LETTER_EXCHANGE", value("app.generation.queue.dead-letter-exchange"));
   set("AIVISTA_GENERATION_QUEUE_NAME", value("app.generation.queue.generation-name"));
   set("AIVISTA_GENERATION_ROUTING_KEY", value("app.generation.queue.generation-routing-key"));
@@ -44,6 +46,15 @@ export function loadJavaLocalEnvironment(path: string | undefined, processEnviro
   set("AIVISTA_BAILIAN_API_KEY", value("app.generation.bailian.api-key"));
   set("AIVISTA_BAILIAN_READ_TIMEOUT_MS", durationMs(value("app.generation.bailian.read-timeout")));
   set("AIVISTA_BAILIAN_MAX_RETRIES", value("app.generation.bailian.max-retries"));
+  set("AIVISTA_AGENT_ENABLED", booleanString(value("app.agent.enabled")));
+  set("AIVISTA_AGENT_MODEL", value("app.agent.model.id"));
+  set("AIVISTA_AGENT_BAILIAN_BASE_URL", value("app.agent.model.base-url"));
+  set("AIVISTA_AGENT_BAILIAN_API_KEY", value("app.agent.model.api-key"));
+  set("AIVISTA_AGENT_THINKING_ENABLED", booleanString(value("app.agent.model.thinking-enabled")));
+  set("AIVISTA_AGENT_MAX_TURNS", value("app.agent.max-turns"));
+  set("AIVISTA_AGENT_MAX_CONCURRENT", value("app.agent.max-concurrent"));
+  set("AIVISTA_AGENT_TOOL_WAIT_TIMEOUT_MS", durationMs(value("app.agent.tool-wait-timeout")));
+  set("AIVISTA_AGENT_LOOP_TIMEOUT_MS", durationMs(value("app.agent.loop-timeout")));
   set("AIVISTA_GENERATION_MAX_CONCURRENT_CALLS", value("app.generation.bailian.max-concurrent-calls"));
   set("AIVISTA_GENERATION_RATE_LIMIT_PER_SECOND", value("app.generation.bailian.rate-limit-per-second"));
   set("AIVISTA_OSS_ENDPOINT", value("app.generation.oss.endpoint"));

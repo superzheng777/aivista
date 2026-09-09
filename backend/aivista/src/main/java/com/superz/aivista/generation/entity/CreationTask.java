@@ -19,6 +19,10 @@ public class CreationTask {
     private Long userId;
     private Long sessionId;
     private String mode;
+    private String status;
+    private String failureCode;
+    private Long revision;
+    private Instant completedAt;
     private Instant createdAt;
     private Instant updatedAt;
 }

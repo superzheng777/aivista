@@ -10,11 +10,16 @@ export function mergeGenerationTurnPages(
   incoming: InfiniteData<GenerationTurnPage>,
 ): InfiniteData<GenerationTurnPage> {
   if (!current) return incoming;
-  const currentTasks = new Map<string, GenerationTurn["generation"]>();
-  for (const page of current.pages) for (const turn of page.items) currentTasks.set(turn.generation.id, turn.generation);
+  const currentTasks = new Map<string, GenerationTurn["generations"][number]>();
+  for (const page of current.pages) for (const turn of page.items) {
+    for (const task of turn.generations) currentTasks.set(task.id, task);
+  }
   return { ...incoming, pages: incoming.pages.map((page) => ({ ...page, items: page.items.map((turn) => {
-    const currentTask = currentTasks.get(turn.generation.id);
-    return currentTask && currentTask.version > turn.generation.version ? { ...turn, generation: currentTask } : turn;
+    const generations = turn.generations.map((task) => {
+      const currentTask = currentTasks.get(task.id);
+      return currentTask && currentTask.version > task.version ? currentTask : task;
+    });
+    return { ...turn, generations };
   }) })) };
 }
 
@@ -28,7 +33,13 @@ export function applyGenerationTaskUpdateToTurns(
 ): InfiniteData<GenerationTurnPage> | undefined {
   if (!current) return current;
   return { ...current, pages: current.pages.map((page) => ({ ...page, items: page.items.map((turn) => {
-    if (turn.generation.id !== event.taskId || event.taskVersion <= turn.generation.version) return turn;
-    return { ...turn, generation: { ...turn.generation, status: event.status, version: event.taskVersion, retryCount: event.retryCount, maxRetryCount: event.maxRetryCount } };
+    let changed = false;
+    const generations = turn.generations.map((task) => {
+      if (task.id !== event.taskId || event.taskVersion <= task.version) return task;
+      changed = true;
+      return { ...task, status: event.status, version: event.taskVersion,
+        retryCount: event.retryCount, maxRetryCount: event.maxRetryCount };
+    });
+    return changed ? { ...turn, generations } : turn;
   }) })) };
 }

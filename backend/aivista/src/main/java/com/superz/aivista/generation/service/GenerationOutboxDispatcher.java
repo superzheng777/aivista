@@ -6,6 +6,7 @@ import com.superz.aivista.generation.config.GenerationQueueProperties;
 import com.superz.aivista.generation.entity.OutboxEvent;
 import com.superz.aivista.generation.mapper.OutboxEventMapper;
 import com.superz.aivista.generation.message.TaskExecuteMessage;
+import com.superz.aivista.generation.message.AgentExecuteMessage;
 import com.superz.aivista.generation.model.OutboxEventType;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -36,6 +37,7 @@ public class GenerationOutboxDispatcher {
 
     private final OutboxEventMapper outboxEventMapper;
     private final GenerationQueuedTaskFailureService queuedTaskFailureService;
+    private final AgentQueuedCreationFailureService queuedCreationFailureService;
     private final RabbitTemplate rabbitTemplate;
     private final ObjectMapper objectMapper;
     private final GenerationQueueProperties properties;
@@ -43,10 +45,12 @@ public class GenerationOutboxDispatcher {
 
     public GenerationOutboxDispatcher(OutboxEventMapper outboxEventMapper,
             GenerationQueuedTaskFailureService queuedTaskFailureService,
+            AgentQueuedCreationFailureService queuedCreationFailureService,
             RabbitTemplate rabbitTemplate, ObjectMapper objectMapper,
             GenerationQueueProperties properties, Clock clock) {
         this.outboxEventMapper = outboxEventMapper;
         this.queuedTaskFailureService = queuedTaskFailureService;
+        this.queuedCreationFailureService = queuedCreationFailureService;
         this.rabbitTemplate = rabbitTemplate;
         this.objectMapper = objectMapper;
         this.properties = properties;
@@ -58,11 +62,13 @@ public class GenerationOutboxDispatcher {
     public void dispatchAvailableEvents() {
         Instant now = clock.instant();
         recoverExpiredProcessingEvents(now);
+        dispatchAvailableEvents(OutboxEventType.AGENT_EXECUTE, properties.agentRoutingKey(), now);
         dispatchAvailableEvents(OutboxEventType.GENERATION_TASK_EXECUTE, properties.generationRoutingKey(), now);
     }
 
     /** Reclaims commands left in PROCESSING by an interrupted dispatcher instance. */
     private void recoverExpiredProcessingEvents(Instant now) {
+        recoverExpiredProcessingEvents(OutboxEventType.AGENT_EXECUTE, now);
         recoverExpiredProcessingEvents(OutboxEventType.GENERATION_TASK_EXECUTE, now);
     }
 
@@ -105,8 +111,13 @@ public class GenerationOutboxDispatcher {
     }
 
     private Message taskMessage(OutboxEvent event) throws JsonProcessingException {
-        Object command = new TaskExecuteMessage(event.getId(), event.getAggregateId(),
-                Math.toIntExact(event.getAggregateVersion()));
+        Object command = switch (OutboxEventType.valueOf(event.getEventType())) {
+            case AGENT_EXECUTE -> new AgentExecuteMessage(
+                    event.getId(), event.getAggregateId(), event.getAggregateVersion());
+            case GENERATION_TASK_EXECUTE -> new TaskExecuteMessage(event.getId(), event.getAggregateId(),
+                    Math.toIntExact(event.getAggregateVersion()));
+            default -> throw new IllegalArgumentException("Unsupported command event " + event.getEventType());
+        };
         byte[] body = objectMapper.writeValueAsBytes(command);
         return MessageBuilder.withBody(body)
                 .setContentType(MessageProperties.CONTENT_TYPE_JSON)
@@ -123,8 +134,13 @@ public class GenerationOutboxDispatcher {
                     now.plus(properties.deliveryRetryDelay().multipliedBy(retries)), error);
             return;
         }
-        queuedTaskFailureService.failDelivery(event.getId(), event.getAggregateId(),
-                Math.toIntExact(event.getAggregateVersion()), now, error);
+        if (OutboxEventType.AGENT_EXECUTE.name().equals(event.getEventType())) {
+            queuedCreationFailureService.failDelivery(event.getId(), event.getAggregateId(),
+                    event.getAggregateVersion(), now, error);
+        } else {
+            queuedTaskFailureService.failDelivery(event.getId(), event.getAggregateId(),
+                    Math.toIntExact(event.getAggregateVersion()), now, error);
+        }
     }
 
 

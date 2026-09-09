@@ -23,12 +23,14 @@ describe("GenerationPipelineExecutionService", () => {
     };
     const transfer = { transfer: vi.fn(async () => { calls.push("transfer"); return [{ sourceIndex: 0,
       objectKey: "generation/7/tasks/301/0", fileSize: 12n, width: 1024, height: 1024 }]; }) };
+    const coordinator = { complete: vi.fn(() => { calls.push("notify-tool"); }) };
     const service = new GenerationPipelineExecutionService(config(), state as never, completionClient as never,
-      bailian as never, transfer as never, { acquire: vi.fn().mockResolvedValue(() => undefined) } as never);
+      bailian as never, transfer as never, { acquire: vi.fn().mockResolvedValue(() => undefined) } as never,
+      coordinator as never);
 
     expect(await service.execute({ eventId: 11n, taskId: 301n, taskVersion: 0 })).toBe(true);
     expect(calls).toEqual(["provider-calling", "provider", "provider-saved", "transfer",
-      "completion-saved", "complete"]);
+      "completion-saved", "complete", "notify-tool"]);
     expect(completionClient.complete).toHaveBeenCalledWith(expect.objectContaining({
       completionId: "generation-301-1", outcome: "COMPLETED", expectedImageCount: 1,
     }));
@@ -42,7 +44,7 @@ describe("GenerationPipelineExecutionService", () => {
     const service = new GenerationPipelineExecutionService(config(),
       { prepare: vi.fn().mockResolvedValue({ kind: "REPLAY", completion }) } as never,
       completionClient as never, bailian as never, transfer as never,
-      { acquire: vi.fn() } as never);
+      { acquire: vi.fn() } as never, { complete: vi.fn() } as never);
 
     expect(await service.execute({ eventId: 11n, taskId: 301n, taskVersion: 0 })).toBe(true);
     expect(completionClient.complete).toHaveBeenCalledWith(completion);
@@ -63,7 +65,8 @@ describe("GenerationPipelineExecutionService", () => {
     const transfer = { transfer: vi.fn().mockResolvedValue([{ sourceIndex: 0,
       objectKey: "generation/7/tasks/301/0", fileSize: 12n, width: 1024, height: 1024 }]) };
     const service = new GenerationPipelineExecutionService(config(), state as never, java as never, bailian as never,
-      transfer as never, { acquire: vi.fn().mockResolvedValue(() => undefined) } as never);
+      transfer as never, { acquire: vi.fn().mockResolvedValue(() => undefined) } as never,
+      { complete: vi.fn() } as never);
     const command = { eventId: 11n, taskId: 301n, taskVersion: 0 };
 
     const first = service.execute(command);

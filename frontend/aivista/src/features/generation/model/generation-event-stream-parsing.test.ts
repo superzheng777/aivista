@@ -4,6 +4,8 @@ import {
   consumeSseStream,
   isPublicationStatusUpdateEvent,
   isTaskUpdateEvent,
+  applyAgentRealtimeEvent,
+  isAgentRealtimeEvent,
   isTerminalStatus,
   parseSseBlock,
   reconnectDelayMs,
@@ -82,6 +84,36 @@ describe("isTerminalStatus", () => {
     for (const status of ["QUEUED"]) {
       expect(isTerminalStatus(status as never)).toBe(false);
     }
+  });
+});
+
+describe("Agent realtime projection", () => {
+  const base = { creationTaskId: "31", sessionId: "9", revision: 4, streamId: "stream-1",
+    sequence: 1, eventType: "RUN_STARTED" as const, payload: {} };
+
+  it("validates, orders and deduplicates deltas within one stream", () => {
+    expect(isAgentRealtimeEvent(base)).toBe(true);
+    let run = applyAgentRealtimeEvent(undefined, base);
+    run = applyAgentRealtimeEvent(run, { ...base, sequence: 2, eventType: "TEXT_DELTA",
+      payload: { contentIndex: 0, delta: "正在构图" } });
+    const duplicate = applyAgentRealtimeEvent(run, { ...base, sequence: 2, eventType: "TEXT_DELTA",
+      payload: { contentIndex: 0, delta: "重复" } });
+    expect(duplicate).toBe(run);
+    expect(run.text).toBe("正在构图");
+  });
+
+  it("accepts Java-owned terminal lifecycle events", () => {
+    expect(isAgentRealtimeEvent({ ...base, revision: 5, sequence: 9, eventType: "RUN_FINISHED",
+      payload: { status: "SUCCEEDED" } })).toBe(true);
+  });
+
+  it("projects safe Tool lifecycle state", () => {
+    let run = applyAgentRealtimeEvent(undefined, base);
+    run = applyAgentRealtimeEvent(run, { ...base, sequence: 2, eventType: "TOOL_STARTED",
+      payload: { toolCallId: "call-1", toolName: "text_to_image" } });
+    run = applyAgentRealtimeEvent(run, { ...base, sequence: 3, eventType: "TOOL_FINISHED",
+      payload: { toolCallId: "call-1", toolName: "text_to_image", outcome: "SUCCEEDED" } });
+    expect(run.tools).toEqual([{ toolCallId: "call-1", toolName: "text_to_image", state: "SUCCEEDED" }]);
   });
 });
 

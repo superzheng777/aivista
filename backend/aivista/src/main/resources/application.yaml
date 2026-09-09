@@ -31,6 +31,17 @@ server:
     context-path: /api
 
 app:
+  agent:
+    enabled: ${AIVISTA_AGENT_ENABLED:false}
+    model:
+      id: ${AIVISTA_AGENT_MODEL:qwen3.8-flash}
+      base-url: ${AIVISTA_AGENT_BAILIAN_BASE_URL:}
+      api-key: ${AIVISTA_AGENT_BAILIAN_API_KEY:}
+      thinking-enabled: ${AIVISTA_AGENT_THINKING_ENABLED:false}
+    max-turns: ${AIVISTA_AGENT_MAX_TURNS:20}
+    max-concurrent: ${AIVISTA_AGENT_MAX_CONCURRENT:4}
+    tool-wait-timeout: 11m
+    loop-timeout: 20m
   meilisearch:
     enabled: ${MEILISEARCH_ENABLED:false}
     endpoint: ${MEILISEARCH_ENDPOINT:}
@@ -101,6 +112,8 @@ app:
       # 当前所有开发配置统一维护在本文件；未配置 RabbitMQ 时保持 false，避免启动分发器。
       enabled: true
       exchange: aivista.generation.commands
+      agent-name: agent.creation.execute
+      agent-routing-key: agent.creation.execute
       generation-name: generation.task.execute
       generation-routing-key: generation.task.execute
       # 并发度由 backend-ts 从本配置读取；Java 不消费生成命令。

@@ -11,10 +11,25 @@ import { GenerationImageTransferService } from "./generation/generation-image-tr
 import { GenerationCompletionClientService } from "./generation/generation-completion-client.service.js";
 import { GenerationPipelineStateService } from "./generation/generation-pipeline-state.service.js";
 import { GenerationPipelineExecutionService } from "./generation/generation-pipeline-execution.service.js";
+import { GenerationCompletionCoordinatorService } from "./generation/generation-completion-coordinator.service.js";
+import { JavaGenerationClient } from "./agent/adapters/java-generation-client.js";
+import { JavaAgentCompletionClient } from "./agent/adapters/java-agent-completion-client.js";
+import { JavaAgentActivityClient } from "./agent/adapters/java-agent-activity-client.js";
+import { AgentExecutionStateService } from "./agent/agent-execution-state.service.js";
+import { AgentImageLoaderService } from "./agent/agent-image-loader.service.js";
+import { AgentModelService } from "./agent/agent-model.service.js";
+import { AgentExecutionService } from "./agent/agent-execution.service.js";
+import { AgentCommandListenerService } from "./agent/agent-command-listener.service.js";
+import { AgentCommandConsumerService } from "./agent/agent-command-consumer.service.js";
+import { JavaAgentRealtimeClient } from "./agent/adapters/java-agent-realtime-client.js";
 
 @Module({ imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnvironment }), DatabaseModule],
   providers: [GenerationImageUrlService, GenerationBailianClientService, GenerationProviderCallGateService,
     GenerationTaskListenerService, GenerationImageTransferService, GenerationTaskConsumerService,
     GenerationCompletionClientService, GenerationPipelineStateService,
-    GenerationPipelineExecutionService] })
+    GenerationPipelineExecutionService, GenerationCompletionCoordinatorService,
+    JavaGenerationClient, JavaAgentCompletionClient, JavaAgentActivityClient,
+    AgentExecutionStateService, AgentImageLoaderService,
+    AgentModelService, JavaAgentRealtimeClient, AgentExecutionService,
+    AgentCommandListenerService, AgentCommandConsumerService] })
 export class GenerationWorkerModule {}

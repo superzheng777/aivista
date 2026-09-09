@@ -10,6 +10,22 @@ import org.apache.ibatis.annotations.Select;
 public interface ConversationMessageMapper extends BaseMapper<ConversationMessage> {
 
     @Select("""
+            SELECT id, session_id, creation_task_id, sequence_no, role, content, created_at
+            FROM conversation_messages
+            WHERE creation_task_id = #{creationTaskId} AND role = 'USER'
+            LIMIT 1
+            """)
+    ConversationMessage selectUserByCreationTaskId(@Param("creationTaskId") long creationTaskId);
+
+    @Select("""
+            SELECT id, session_id, creation_task_id, sequence_no, role, content, created_at
+            FROM conversation_messages
+            WHERE creation_task_id = #{creationTaskId} AND role = 'ASSISTANT'
+            LIMIT 1
+            """)
+    ConversationMessage selectAssistantByCreationTaskId(@Param("creationTaskId") long creationTaskId);
+
+    @Select("""
             <script>
             SELECT id, session_id, creation_task_id, sequence_no, role, content, created_at
             FROM conversation_messages
@@ -32,4 +48,16 @@ public interface ConversationMessageMapper extends BaseMapper<ConversationMessag
             FOR UPDATE
             """)
     Integer selectLastSequenceNoForUpdate(@Param("sessionId") long sessionId);
+
+    @Select("""
+            SELECT id, session_id, creation_task_id, sequence_no, role, content, created_at
+            FROM conversation_messages
+            WHERE session_id = #{sessionId} AND sequence_no < #{beforeSequenceNo}
+            ORDER BY sequence_no DESC
+            LIMIT #{limit}
+            """)
+    List<ConversationMessage> selectRecentBeforeSequence(
+            @Param("sessionId") long sessionId,
+            @Param("beforeSequenceNo") int beforeSequenceNo,
+            @Param("limit") int limit);
 }

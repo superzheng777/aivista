@@ -11,6 +11,7 @@ import { GenerationPipelineStateService } from "./generation-pipeline-state.serv
 import { BailianConnectionError, BailianProviderError, providerFailureCode } from "./generation-provider-error.js";
 import { GenerationProviderCallGateService } from "./generation-provider-call-gate.service.js";
 import type { TaskExecuteMessage } from "./generation-task-message.js";
+import { GenerationCompletionCoordinatorService } from "./generation-completion-coordinator.service.js";
 
 @Injectable()
 export class GenerationPipelineExecutionService {
@@ -20,7 +21,8 @@ export class GenerationPipelineExecutionService {
 
   constructor(config: ConfigService<Environment, true>, private readonly state: GenerationPipelineStateService,
     private readonly java: GenerationCompletionClientService, private readonly bailian: GenerationBailianClientService,
-    private readonly transfer: GenerationImageTransferService, private readonly gate: GenerationProviderCallGateService) {
+    private readonly transfer: GenerationImageTransferService, private readonly gate: GenerationProviderCallGateService,
+    private readonly completionCoordinator: GenerationCompletionCoordinatorService) {
     this.maxRetries = config.get("AIVISTA_BAILIAN_MAX_RETRIES", { infer: true });
   }
 
@@ -37,7 +39,10 @@ export class GenerationPipelineExecutionService {
   private async executeOnce(message: TaskExecuteMessage, signal?: AbortSignal): Promise<boolean> {
     const plan = await this.state.prepare(message, new Date());
     if (plan.kind === "ACK") return true;
-    if (plan.kind === "REPLAY") { await this.java.complete(plan.completion); return true; }
+    if (plan.kind === "REPLAY") {
+      this.completionCoordinator.complete(await this.java.complete(plan.completion));
+      return true;
+    }
     const executionVersion = message.taskVersion + 1;
     if (plan.kind === "OUTCOME_UNKNOWN") {
       return this.commit(message, generationFailed(message.taskId, executionVersion, "PROVIDER_CALL_OUTCOME_UNKNOWN"));
@@ -80,7 +85,7 @@ export class GenerationPipelineExecutionService {
 
   private async commit(message: TaskExecuteMessage, completion: GenerationCompletion): Promise<boolean> {
     await this.state.saveCompletion(completion, message.taskVersion, new Date());
-    await this.java.complete(completion);
+    this.completionCoordinator.complete(await this.java.complete(completion));
     return true;
   }
 

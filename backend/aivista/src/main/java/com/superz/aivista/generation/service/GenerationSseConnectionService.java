@@ -4,6 +4,7 @@ import com.superz.aivista.common.exception.BusinessException;
 import com.superz.aivista.common.exception.ErrorCode;
 import com.superz.aivista.generation.config.GenerationSseProperties;
 import com.superz.aivista.generation.event.GenerationTaskStatusEvent;
+import com.superz.aivista.generation.event.AgentRealtimeEvent;
 import com.superz.aivista.publication.event.PublicationStatusEvent;
 import com.superz.aivista.user.event.InteractionNotificationCreatedEvent;
 import java.io.IOException;
@@ -57,6 +58,10 @@ public class GenerationSseConnectionService {
 
     public void publish(long userId, long eventId, InteractionNotificationCreatedEvent event) {
         publish(userId, eventId, "interaction.notification.created", event);
+    }
+
+    public void publishAgent(long userId, long eventId, AgentRealtimeEvent event) {
+        publish(userId, eventId, "agent.creation.event", event);
     }
 
     private void publish(long userId, long eventId, String eventName, Object event) {

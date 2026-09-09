@@ -8,6 +8,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record GenerationQueueProperties(
         boolean enabled,
         String exchange,
+        String agentName,
+        String agentRoutingKey,
         String generationName,
         String generationRoutingKey,
         Duration dispatcherFixedDelay,

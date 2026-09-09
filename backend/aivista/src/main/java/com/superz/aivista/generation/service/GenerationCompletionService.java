@@ -3,6 +3,7 @@ package com.superz.aivista.generation.service;
 import com.superz.aivista.generation.entity.GenerationTask;
 import com.superz.aivista.generation.entity.ImageAsset;
 import com.superz.aivista.generation.mapper.GenerationTaskMapper;
+import com.superz.aivista.generation.mapper.CreationTaskMapper;
 import com.superz.aivista.generation.mapper.ImageAssetMapper;
 import com.superz.aivista.generation.mapper.OutboxEventMapper;
 import com.superz.aivista.generation.mapper.UserGenerationDailyUsageMapper;
@@ -25,14 +26,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class GenerationCompletionService {
     private static final ZoneId QUOTA_ZONE = ZoneId.of("Asia/Shanghai");
     private final GenerationTaskMapper tasks;
+    private final CreationTaskMapper creations;
     private final ImageAssetMapper images;
     private final OutboxEventMapper outbox;
     private final UserGenerationDailyUsageMapper usage;
     private final Clock clock;
 
-    public GenerationCompletionService(GenerationTaskMapper tasks, ImageAssetMapper images,
+    public GenerationCompletionService(GenerationTaskMapper tasks, CreationTaskMapper creations, ImageAssetMapper images,
             OutboxEventMapper outbox, UserGenerationDailyUsageMapper usage, Clock clock) {
         this.tasks = tasks;
+        this.creations = creations;
         this.images = images;
         this.outbox = outbox;
         this.usage = usage;
@@ -54,7 +57,19 @@ public class GenerationCompletionService {
         } else {
             completeImages(task, command, now);
         }
-        return response(requireTask(taskId));
+        GenerationTask completed = requireTask(taskId);
+        completeNormalCreation(completed, now);
+        return response(completed);
+    }
+
+    private void completeNormalCreation(GenerationTask task, Instant now) {
+        var creation = creations.selectByIdForUpdate(task.getCreationTaskId());
+        if (creation == null || !"NORMAL".equals(creation.getMode()) || !"RUNNING".equals(creation.getStatus())) {
+            return;
+        }
+        boolean succeeded = "SUCCEEDED".equals(task.getStatus()) || "PARTIALLY_SUCCEEDED".equals(task.getStatus());
+        creations.completeRunning(creation.getId(), creation.getRevision(), succeeded ? "SUCCEEDED" : "FAILED",
+                succeeded ? null : task.getFailureCode(), now);
     }
 
     private void completeImages(GenerationTask task, GenerationCompletionCommand command, Instant now) {
@@ -123,7 +138,8 @@ public class GenerationCompletionService {
                 .map(asset -> new GenerationCompletionResponse.CompletedAsset(asset.getId().toString(),
                         asset.getSourceIndex(), asset.getWidth(), asset.getHeight()))
                 .toList();
-        return new GenerationCompletionResponse(task.getId().toString(), task.getStatus(), task.getTaskVersion(), assets);
+        return new GenerationCompletionResponse(task.getId().toString(), task.getStatus(), task.getTaskVersion(),
+                task.getFailureCode(), assets);
     }
 
     private GenerationTask requireTask(long taskId) {

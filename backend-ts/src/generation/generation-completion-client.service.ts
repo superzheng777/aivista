@@ -8,6 +8,7 @@ const responseSchema = z.object({
   taskId: z.string().regex(/^\d+$/),
   status: z.enum(["QUEUED", "SUCCEEDED", "PARTIALLY_SUCCEEDED", "FAILED"]),
   taskVersion: z.number().int().nonnegative(),
+  failureCode: z.string().nullable().optional(),
   assets: z.array(z.object({ assetId: z.string().regex(/^\d+$/), sourceIndex: z.number().int().nonnegative(),
     width: z.number().int().positive(), height: z.number().int().positive() })),
 });

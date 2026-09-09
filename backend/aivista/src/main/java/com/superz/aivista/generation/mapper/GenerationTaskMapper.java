@@ -11,6 +11,9 @@ import org.apache.ibatis.annotations.Update;
 /** 生成任务数据访问接口，包含各阶段的条件状态迁移与超时扫描。 */
 public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
 
+    @Select("SELECT creation_task_id FROM generation_tasks WHERE id = #{taskId} LIMIT 1")
+    Long selectCreationTaskId(@Param("taskId") long taskId);
+
     @Select("""
             SELECT id, user_id, session_id, creation_task_id, model, status, task_version,
                    attempt_count, final_prompt, final_negative_prompt,
@@ -85,6 +88,7 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
             <foreach collection="creationTaskIds" item="creationTaskId" open="(" separator="," close=")">
                 #{creationTaskId}
             </foreach>
+            ORDER BY creation_task_id, created_at, id
             </script>
             """)
     List<GenerationTask> selectByCreationTaskIds(@Param("creationTaskIds") List<Long> creationTaskIds);

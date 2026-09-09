@@ -67,9 +67,13 @@ class GenerationTaskCreationServiceTests {
         GenerationTaskProperties properties = new GenerationTaskProperties(
                 "bailian/qwen-image-2.0", 4, 12, 1000, 500, 1, 6,
                 Map.of("1:1", "2048*2048"));
-        service = new GenerationTaskCreationService(userMapper, sessionMapper, messageMapper,
-                creationTaskMapper, creationTaskInputAssetMapper, taskMapper,
-                imageAssetMapper, taskInputAssetMapper, dailyUsageMapper, outboxEventMapper, idempotencyRecordMapper, properties,
+        var provisioning = new GenerationTaskProvisioningService(taskMapper, imageAssetMapper,
+                taskInputAssetMapper, dailyUsageMapper, outboxEventMapper, properties);
+        var specificationValidator = new GenerationTaskSpecificationValidator(properties);
+        var creationStart = new CreationTaskStartService(sessionMapper, messageMapper,
+                creationTaskMapper, creationTaskInputAssetMapper);
+        service = new GenerationTaskCreationService(userMapper, creationStart, provisioning, idempotencyRecordMapper,
+                specificationValidator,
                 Clock.fixed(NOW, ZoneOffset.UTC), new ObjectMapper());
         when(userMapper.selectIdForUpdate(USER_ID)).thenReturn(USER_ID);
         when(taskMapper.countActiveByUserId(USER_ID)).thenReturn(0);

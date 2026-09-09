@@ -10,6 +10,15 @@ spring:
     password: rabbit-secret
     virtual-host: /aivista
 app:
+  agent:
+    enabled: true
+    model:
+      id: qwen3.8-flash
+      base-url: https://agent.example/compatible-mode/v1
+      api-key: agent-secret
+      thinking-enabled: false
+    max-turns: 20
+    max-concurrent: 4
   publication:
     moderation:
       endpoint: green.example
@@ -20,6 +29,8 @@ app:
     queue:
       enabled: true
       exchange: custom.exchange
+      agent-name: agent.creation.execute
+      agent-routing-key: agent.execute
       dead-letter-exchange: custom.dead-letter
       generation-name: generation.task.execute
       generation-routing-key: generation.execute

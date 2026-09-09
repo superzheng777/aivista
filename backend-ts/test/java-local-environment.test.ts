@@ -16,8 +16,16 @@ describe("Java local profile bridge", () => {
       AIVISTA_RABBITMQ_VHOST: "/aivista",
       AIVISTA_GENERATION_QUEUE_ENABLED: "true",
       AIVISTA_GENERATION_EXCHANGE: "custom.exchange",
+      AIVISTA_AGENT_QUEUE_NAME: "agent.creation.execute",
+      AIVISTA_AGENT_ROUTING_KEY: "agent.execute",
       AIVISTA_GENERATION_CONSUMER_CONCURRENCY: 7,
       AIVISTA_BAILIAN_READ_TIMEOUT_MS: 330000,
+      AIVISTA_AGENT_ENABLED: "true",
+      AIVISTA_AGENT_MODEL: "qwen3.8-flash",
+      AIVISTA_AGENT_BAILIAN_BASE_URL: "https://agent.example/compatible-mode/v1",
+      AIVISTA_AGENT_THINKING_ENABLED: "false",
+      AIVISTA_AGENT_MAX_TURNS: 20,
+      AIVISTA_AGENT_MAX_CONCURRENT: 4,
       AIVISTA_OSS_SIGNED_URL_TTL_SECONDS: 600,
     });
   });

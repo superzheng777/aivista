@@ -28,12 +28,28 @@ public class GenerationRabbitConfiguration {
     }
 
     @Bean
+    Queue agentExecuteQueue(GenerationQueueProperties properties) {
+        return QueueBuilder.durable(properties.agentName())
+                .withArgument("x-queue-type", "quorum")
+                .build();
+    }
+
+    @Bean
     Binding generationTaskExecuteBinding(@Qualifier("generationTaskExecuteQueue") Queue generationTaskExecuteQueue,
             @Qualifier("generationCommandExchange") DirectExchange generationCommandExchange,
             GenerationQueueProperties properties) {
         return BindingBuilder.bind(generationTaskExecuteQueue)
                 .to(generationCommandExchange)
                 .with(properties.generationRoutingKey());
+    }
+
+    @Bean
+    Binding agentExecuteBinding(@Qualifier("agentExecuteQueue") Queue agentExecuteQueue,
+            @Qualifier("generationCommandExchange") DirectExchange generationCommandExchange,
+            GenerationQueueProperties properties) {
+        return BindingBuilder.bind(agentExecuteQueue)
+                .to(generationCommandExchange)
+                .with(properties.agentRoutingKey());
     }
 
 }

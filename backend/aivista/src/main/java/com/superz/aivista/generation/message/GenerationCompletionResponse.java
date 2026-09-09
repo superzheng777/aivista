@@ -7,6 +7,7 @@ public record GenerationCompletionResponse(
         String taskId,
         String status,
         int taskVersion,
+        String failureCode,
         List<CompletedAsset> assets) {
 
     public record CompletedAsset(String assetId, int sourceIndex, int width, int height) {

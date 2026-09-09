@@ -4,8 +4,12 @@ package com.superz.aivista.generation.dto;
 public record ConversationTurnResponse(
         String creationTaskId,
         String mode,
+        String status,
+        String failureCode,
+        long revision,
         ConversationMessageResponse userMessage,
         ConversationMessageResponse assistantMessage,
         NormalGenerationRequestResponse normalGenerationRequest,
-        GenerationTaskSnapshotResponse generation) {
+        java.util.List<GenerationTaskSnapshotResponse> generations,
+        java.util.List<CreationActivityResponse> activities) {
 }
